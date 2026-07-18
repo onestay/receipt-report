@@ -1,0 +1,53 @@
+name: Feature
+description: A bounded user-facing or technical capability
+title: ""
+labels:
+  - type:feature
+body:
+  - type: markdown
+    attributes:
+      value: Describe one independently verifiable change. Add `agent-ready` only after the specification is complete.
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What outcome should this issue produce?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What work belongs in this issue?
+    validations:
+      required: true
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Non-goals
+      description: What related work is explicitly excluded?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Provide a checklist of observable, testable outcomes.
+      value: |
+        - [ ]
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification
+      description: Which automated and manual checks should demonstrate completion?
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies and context
+      description: Link prerequisite issues, documents, or decisions. Write "None" if there are none.
+    validations:
+      required: true

@@ -1,0 +1,38 @@
+name: Bug
+description: Reproducible incorrect behavior
+title: ""
+labels:
+  - type:bug
+body:
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Add sanitized logs, screenshots, or failing tests. Do not include receipt data or secrets.
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      value: |
+        - [ ] A regression test fails before the fix and passes afterward
+        - [ ] The reported behavior is corrected
+    validations:
+      required: true
