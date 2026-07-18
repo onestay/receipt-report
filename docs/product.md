@@ -8,8 +8,10 @@ reviewable and correctable.
 
 ## Primary workflow
 
-1. A receipt arrives through image upload. Email import will be added later.
-2. A background worker sends its image to a configured multimodal AI model.
+1. A receipt arrives as an uploaded image or PDF. Email import will be added
+   later and will feed the same ingestion pipeline.
+2. A background worker normalizes its pages and sends them to a configured
+   multimodal AI model.
 3. The model extracts receipt fields and categorizes line items.
 4. Deterministic validation checks totals, types, and structural consistency.
 5. The user reviews uncertain or incorrect values and approves the receipt.
@@ -21,7 +23,7 @@ reviewable and correctable.
 - Self-hosted web application
 - Versioned REST API suitable for a future mobile client
 - German receipts, German terminology, and EUR
-- Image upload and filesystem storage
+- Image and PDF upload with filesystem storage
 - Configurable multimodal AI provider
 - Editable receipt and line-item extraction
 - Categories and correction rules
@@ -48,7 +50,7 @@ reviewable and correctable.
 
 - AI performs interpretation; deterministic code enforces invariants.
 - Corrections must be quicker than entering a receipt manually.
-- The original image remains available during review.
+- The original document and all of its pages remain available during review.
 - User corrections take precedence over later reprocessing.
 - Sensitive data remains under the operator's control, except when explicitly
   sent to the configured model provider.

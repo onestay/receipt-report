@@ -18,7 +18,7 @@ SQLite-backed jobs     metadata
 worker ---- AI provider
        |
        v
-receipt image storage
+receipt document storage
 ```
 
 ## Intended workspace
@@ -47,21 +47,24 @@ planning commit.
 - Model providers implement a small internal receipt extraction interface.
 - The worker owns long-running model calls; HTTP requests enqueue work instead
   of waiting for extraction to finish.
-- Receipt images are stored on a mounted filesystem. SQLite stores metadata and
-  stable relative paths, not image blobs.
+- Original receipt images and PDFs are stored on a mounted filesystem. SQLite
+  stores metadata and stable relative paths, not document blobs.
+- PDFs and other multi-page inputs are normalized into ordered page images for
+  review and provider-independent processing. The original PDF is retained.
 
 ## Persistence
 
 SQLite is the primary database and should use WAL mode where deployment permits.
-The database and receipt image directory must be mountable and backable up
+The database and receipt document directory must be mountable and backable up
 together. Jobs begin as ordinary database records; no separate queue service is
 needed for the initial workload.
 
 ## Trust boundaries
 
-Images, email content, API requests, and model responses are untrusted. Zod
-validates transport and model schemas. Domain validation separately verifies
-receipt invariants such as totals, dates, quantities, and currency.
+Images, PDFs, email content, API requests, and model responses are untrusted.
+File signatures, size and page limits, and transport schemas must be validated.
+Domain validation separately verifies receipt invariants such as totals, dates,
+quantities, and currency.
 
 ## Deployment
 

@@ -24,7 +24,7 @@ These instructions apply to the entire repository.
 - Keep receipt calculations deterministic and independent of the AI provider.
 - Do not add a dependency unless the standard library or an existing dependency
   cannot reasonably solve the problem. Explain meaningful additions in the PR.
-- Never commit secrets, receipt images, databases, or real email content.
+- Never commit secrets, receipt documents, databases, or real email content.
 
 ## Verification
 

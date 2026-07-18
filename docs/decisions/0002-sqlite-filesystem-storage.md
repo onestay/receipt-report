@@ -12,10 +12,12 @@ need.
 ## Decision
 
 Use Prisma with SQLite for structured data and a mounted local directory for
-receipt images. Store stable relative paths and image hashes in the database.
+original receipt images, PDFs, and normalized page images. Store stable relative
+paths and document hashes in the database.
 
 ## Consequences
 
-Deployment and backup are simple, but the database and image directory must be
-backed up consistently. Multi-instance writes and horizontal scaling are not
-initial design goals.
+Deployment and backup are simple, but the database and document directory must
+be backed up consistently. PDF rendering adds a local processing dependency and
+derived page files. Multi-instance writes and horizontal scaling are not initial
+design goals.

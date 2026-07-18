@@ -16,6 +16,7 @@ domain schemas.
 
 ## Consequences
 
-Provider-specific structured-output and image behavior remains isolated. Some
-adapter code is duplicated intentionally rather than hidden behind a broad AI
-framework abstraction.
+Provider-specific structured-output and page-image behavior remains isolated.
+PDFs are normalized before this boundary so adapters do not all need native PDF
+support. Some adapter code is duplicated intentionally rather than hidden behind
+a broad AI framework abstraction.

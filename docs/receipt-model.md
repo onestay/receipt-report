@@ -14,12 +14,23 @@ This document captures concepts rather than a final database schema.
 - Original model values and user-approved values
 - Creation, processing, review, and update timestamps
 
-## Receipt image
+## Receipt document
 
 - Receipt identifier
-- Stable relative storage path
+- Stable relative path to the original uploaded image or PDF
+- Media type, byte size, and SHA-256 digest
+- Original filename when available, stored only after sanitization
+
+## Receipt page
+
+- Receipt document identifier
+- Stable relative path to the normalized page image
+- Page number and total page count
 - Media type, byte size, dimensions, and SHA-256 digest
-- Page order for multi-image receipts
+
+Images normally produce one normalized page. PDFs may produce multiple ordered
+pages. The original file is retained while page images provide a consistent
+input for review and AI providers.
 
 ## Line item
 
@@ -37,7 +48,7 @@ Floating-point numbers must not be used for money.
 
 ## Processing attempt
 
-- Receipt and image references
+- Receipt, document, and page references
 - Provider, model, and prompt/profile version
 - Start and completion timestamps
 - Status and sanitized error details
