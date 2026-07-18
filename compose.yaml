@@ -1,0 +1,49 @@
+services:
+  api:
+    build: .
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+      DATABASE_URL: file:/data/receipt-report.db
+      STORAGE_PATH: /data/documents
+      WEB_DIST_DIR: /app/apps/web/dist
+    ports:
+      - "${RECEIPT_REPORT_PORT:-3000}:3000"
+    volumes:
+      - receipt-data:/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/v1/health').then(r=>{if(!r.ok)process.exit(1)})",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  worker:
+    build: .
+    command:
+      [
+        "sh",
+        "-c",
+        "pnpm --filter @receipt-report/database db:migrate:deploy && pnpm --filter @receipt-report/worker start",
+      ]
+    environment:
+      DATABASE_URL: file:/data/receipt-report.db
+      STORAGE_PATH: /data/documents
+      WORKER_READY_FILE: /tmp/receipt-report-worker.ready
+    volumes:
+      - receipt-data:/data
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/receipt-report-worker.ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+volumes:
+  receipt-data:

@@ -1,0 +1,16 @@
+{
+  "name": "@receipt-report/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@receipt-report/config": "workspace:*",
+    "@receipt-report/database": "workspace:*"
+  }
+}

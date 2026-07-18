@@ -51,12 +51,12 @@ selectors.
 Vitest collects V8 coverage for unit and integration suites. The initial global
 minimums are:
 
-| Metric | Minimum |
-| --- | ---: |
-| Lines | 90% |
-| Statements | 90% |
-| Functions | 90% |
-| Branches | 85% |
+| Metric     | Minimum |
+| ---------- | ------: |
+| Lines      |     90% |
+| Statements |     90% |
+| Functions  |     90% |
+| Branches   |     85% |
 
 Thresholds apply to application and shared-package source code collectively and
 must fail CI when unmet. Generated files, declarations, migrations, and trivial
