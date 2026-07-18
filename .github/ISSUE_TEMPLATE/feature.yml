@@ -41,7 +41,7 @@ body:
     id: verification
     attributes:
       label: Verification
-      description: Which automated and manual checks should demonstrate completion?
+      description: Which unit, integration, browser, and manual checks should demonstrate completion? Explain when a test level is not applicable.
     validations:
       required: true
   - type: textarea

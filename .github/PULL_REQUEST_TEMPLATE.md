@@ -13,10 +13,15 @@ Closes #
 - [ ] Formatting
 - [ ] Linting
 - [ ] Type checking
-- [ ] Tests
+- [ ] Unit/integration tests and coverage thresholds
+- [ ] Playwright browser tests
 - [ ] Build
 
 <!-- List exact commands and any relevant manual checks. Explain checks that were not run. -->
+
+### Test changes
+
+<!-- Describe the behaviors covered by new or changed tests. If a test level is not applicable, explain why. -->
 
 ## Data and privacy
 

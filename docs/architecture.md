@@ -71,3 +71,16 @@ quantities, and currency.
 The intended installation uses Docker Compose with persistent volumes. The web
 client, API, and worker may be separate containers, but should be built from the
 same repository and version.
+
+## Verification architecture
+
+- Vitest runs unit and integration tests across applications and packages.
+- API and persistence integration tests use an isolated temporary SQLite
+  database and real migrations rather than mocking the database boundary.
+- AI and email integrations use deterministic fakes in ordinary CI.
+- Playwright exercises the deployed web/API stack through the browser from the
+  first user-facing workflow.
+- Pull requests must pass formatting, linting, strict type checking,
+  unit/integration coverage thresholds, production builds, and browser tests.
+
+See `docs/testing.md` and ADR 0004 for the detailed strategy.

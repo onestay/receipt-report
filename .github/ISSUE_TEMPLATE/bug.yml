@@ -34,5 +34,6 @@ body:
       value: |
         - [ ] A regression test fails before the fix and passes afterward
         - [ ] The reported behavior is corrected
+        - [ ] Coverage and browser checks remain green
     validations:
       required: true

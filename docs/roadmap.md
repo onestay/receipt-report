@@ -6,7 +6,12 @@ working, verified state.
 ## 1. Foundation
 
 - Scaffold the pnpm TypeScript workspace
-- Configure formatting, linting, strict type checking, tests, and CI
+- Configure formatting, linting, and strict type checking
+- Configure Vitest unit/integration tests with coverage collection and enforced
+  repository thresholds
+- Configure Playwright and a minimal browser smoke test before feature UI work
+- Add pull-request CI for static checks, coverage, builds, and browser tests
+- Publish human-readable coverage and Playwright artifacts from CI
 - Create API, worker, and web application shells
 - Add SQLite/Prisma plumbing and health checks
 - Add local and Docker Compose development workflows
@@ -57,7 +62,7 @@ working, verified state.
 ## Definition of done for a milestone
 
 - Acceptance criteria for its issues are met
-- Formatting, linting, types, tests, and builds pass
+- Formatting, linting, types, coverage thresholds, browser tests, and builds pass
 - Relevant user workflow is demonstrable
 - Documentation and API contracts are current
 - Persistent-data migration and backup implications are documented

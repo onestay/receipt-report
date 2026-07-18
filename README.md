@@ -18,9 +18,13 @@ for the intended delivery order.
 - Zod for runtime validation and shared contracts
 - A separate worker process for asynchronous receipt processing
 - Local filesystem storage for receipt images and PDFs
+- Vitest for unit and integration tests with enforced coverage thresholds
+- Playwright for browser tests from the first user-facing workflow
 
 The stack is recorded in [`docs/architecture.md`](docs/architecture.md). Changes
 to foundational decisions should be captured in `docs/decisions/`.
+
+Testing expectations are defined in [`docs/testing.md`](docs/testing.md).
 
 ## Development status
 

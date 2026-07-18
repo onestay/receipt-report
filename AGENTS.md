@@ -28,10 +28,16 @@ These instructions apply to the entire repository.
 
 ## Verification
 
-- Add or update tests for behavior changes.
-- Run the repository's formatting, linting, type-checking, test, and build
-  commands before finishing. If a command cannot be run, state why.
+- Add or update unit, integration, and browser tests at the appropriate level for
+  every behavior change. Bug fixes require a regression test.
+- Do not weaken coverage thresholds, exclude application code from coverage, or
+  replace behavioral assertions with snapshots merely to make checks pass.
+- Run the repository's formatting, linting, type-checking, unit/integration
+  tests with coverage, browser tests, and build commands before finishing. If a
+  command cannot be run, state why.
 - Keep anonymized fixtures minimal and clearly synthetic.
+- Tests must not call paid AI providers, external email services, or the public
+  internet unless they are explicitly marked as opt-in external tests.
 
 ## Documentation and decisions
 
