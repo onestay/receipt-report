@@ -12,6 +12,7 @@ working, verified state.
 - Configure Playwright and a minimal browser smoke test before feature UI work
 - Add pull-request CI for static checks, coverage, builds, and browser tests
 - Publish human-readable coverage and Playwright artifacts from CI
+- Configure and document Claude specification and pull-request review gates
 - Create API, worker, and web application shells
 - Add SQLite/Prisma plumbing and health checks
 - Add local and Docker Compose development workflows

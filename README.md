@@ -30,7 +30,13 @@ Testing expectations are defined in [`docs/testing.md`](docs/testing.md).
 
 No application has been scaffolded yet. Work should be driven by small issues
 with explicit acceptance criteria. Issues carrying the `agent-ready` label are
-expected to be implementable without additional product decisions.
+expected to be implementable without additional product decisions and to have
+completed an independent Claude specification review. Implementation pull
+requests receive Claude code review before merge so agents can cross-check one
+another.
+
+The complete handoff and cross-review process is documented in
+[`docs/agent-workflow.md`](docs/agent-workflow.md).
 
 ## Data and privacy
 

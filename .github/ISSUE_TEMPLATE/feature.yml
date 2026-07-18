@@ -51,3 +51,11 @@ body:
       description: Link prerequisite issues, documents, or decisions. Write "None" if there are none.
     validations:
       required: true
+  - type: checkboxes
+    id: readiness
+    attributes:
+      label: Agent readiness
+      description: Complete specification review before adding the `agent-ready` label.
+      options:
+        - label: Claude has reviewed the goal, scope, non-goals, acceptance criteria, and verification plan
+        - label: Claude findings have been incorporated or explicitly resolved in the issue discussion

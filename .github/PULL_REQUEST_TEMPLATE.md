@@ -27,3 +27,8 @@ Closes #
 
 - [ ] No secrets, real receipts, databases, or email content are included
 - [ ] Persistence, migration, and backup implications are documented if relevant
+
+## Cross-review
+
+- [ ] Claude code review has been requested with `@claude`
+- [ ] Claude findings have been addressed or explicitly dispositioned in the PR

@@ -89,6 +89,11 @@ CI publishes a browsable coverage report and Playwright failure artifacts. Test
 commands must also be runnable locally through stable root-level package scripts.
 Branch protection should require these checks once their workflow names exist.
 
+Automated checks are followed by independent Claude code review on every
+implementation pull request. Review findings must be resolved or explicitly
+dispositioned before merge. Agent review complements, but cannot replace, the
+required test and coverage checks.
+
 ## Fixtures and external systems
 
 - Receipt fixtures must be synthetic or irreversibly anonymized.

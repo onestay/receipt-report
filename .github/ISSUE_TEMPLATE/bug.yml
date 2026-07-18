@@ -37,3 +37,11 @@ body:
         - [ ] Coverage and browser checks remain green
     validations:
       required: true
+  - type: checkboxes
+    id: readiness
+    attributes:
+      label: Agent readiness
+      description: Complete specification review before adding the `agent-ready` label.
+      options:
+        - label: Claude has reviewed the reproduction, expected behavior, acceptance criteria, and regression-test plan
+        - label: Claude findings have been incorporated or explicitly resolved in the issue discussion

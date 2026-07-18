@@ -6,7 +6,8 @@ These instructions apply to the entire repository.
 
 1. Read the issue and the relevant documents under `docs/`.
 2. Confirm the issue has a bounded goal, acceptance criteria, and explicit
-   non-goals. Do not silently expand its scope.
+   non-goals. It must have completed the Claude specification-review step before
+   receiving `agent-ready`. Do not silently expand its scope.
 3. Inspect the current implementation and working tree before editing.
 
 ## Engineering rules
@@ -52,4 +53,9 @@ These instructions apply to the entire repository.
 - Use focused commits and do not alter unrelated user changes.
 - PR descriptions must link the issue, summarize the result, and list the
   verification performed.
+- Request Claude review on every implementation pull request. Address its
+  findings or record a concrete reason for declining each finding before merge.
+- Treat cross-review as independent evidence, not a substitute for tests or
+  human judgment. Never have one agent silently approve its own output on behalf
+  of another.
 - Agents must not merge their own pull requests unless explicitly instructed.
