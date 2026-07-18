@@ -13,4 +13,4 @@ RUN apt-get update && apt-get install --yes --no-install-recommends ca-certifica
 RUN corepack enable && corepack prepare pnpm@11.14.0 --activate
 COPY --from=build /app /app
 EXPOSE 3000
-CMD ["sh", "-c", "pnpm --filter @receipt-report/database db:migrate:deploy && exec node apps/api/dist/index.js"]
+CMD ["node", "apps/api/dist/index.js"]

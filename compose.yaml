@@ -1,6 +1,18 @@
 services:
+  migrate:
+    build: .
+    command:
+      ["pnpm", "--filter", "@receipt-report/database", "db:migrate:deploy"]
+    environment:
+      DATABASE_URL: file:/data/receipt-report.db
+    volumes:
+      - receipt-data:/data
+
   api:
     build: .
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     environment:
       HOST: 0.0.0.0
       PORT: 3000
@@ -26,12 +38,10 @@ services:
 
   worker:
     build: .
-    command:
-      [
-        "sh",
-        "-c",
-        "pnpm --filter @receipt-report/database db:migrate:deploy && exec node apps/worker/dist/index.js",
-      ]
+    command: ["node", "apps/worker/dist/index.js"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     environment:
       DATABASE_URL: file:/data/receipt-report.db
       STORAGE_PATH: /data/documents

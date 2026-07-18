@@ -54,7 +54,7 @@ curl --fail http://127.0.0.1:3000/api/v1/health
 docker compose down
 ```
 
-The API serves the built web bundle and both API and worker mount the `receipt-data` volume at `/data`. That volume holds the SQLite database and reserved document-storage root so they can be backed up together. Change the host port with `RECEIPT_REPORT_PORT=8080`.
+The one-shot `migrate` service applies migrations exactly once before API and worker start. The API serves the built web bundle, and all three services mount the `receipt-data` volume at `/data` only where migration or runtime persistence requires it. That volume holds the SQLite database and reserved document-storage root so they can be backed up together. Change the host port with `RECEIPT_REPORT_PORT=8080`.
 
 The bounded smoke command creates an isolated Compose project, verifies service health and a real Prisma `SELECT 1`, then removes its test volume:
 

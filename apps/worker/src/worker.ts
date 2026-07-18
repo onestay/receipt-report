@@ -22,7 +22,7 @@ export async function startWorker(
   console.log("receipt-report-worker ready");
 
   let stopped = false;
-  const idleTimer = setInterval(console.debug, 60_000);
+  const idleTimer = setInterval(Boolean, 60_000);
   async function stop() {
     if (stopped) return;
     stopped = true;
