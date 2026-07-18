@@ -1,0 +1,44 @@
+{
+  "name": "receipt-report",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.14.0",
+  "engines": {
+    "node": ">=24 <25",
+    "pnpm": ">=11 <12"
+  },
+  "scripts": {
+    "postinstall": "pnpm --filter @receipt-report/database db:generate",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "typecheck": "pnpm build:packages && pnpm --filter './apps/**' typecheck",
+    "test": "pnpm build:packages && vitest run",
+    "test:coverage": "pnpm build && vitest run --coverage",
+    "build:packages": "pnpm --filter './packages/**' build",
+    "build:apps": "pnpm --filter './apps/**' build",
+    "build": "pnpm build:packages && pnpm build:apps",
+    "dev": "pnpm build:packages && concurrently -k -n api,worker,web 'pnpm --filter @receipt-report/api dev' 'pnpm --filter @receipt-report/worker dev' 'pnpm --filter @receipt-report/web dev'",
+    "test:e2e": "pnpm build && playwright test",
+    "compose:config": "docker compose config",
+    "compose:smoke": "bash scripts/compose-smoke.sh"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "1.61.1",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.1",
+    "@types/node": "24.10.1",
+    "@vitest/coverage-v8": "4.1.10",
+    "concurrently": "9.2.1",
+    "eslint": "10.7.0",
+    "globals": "17.3.0",
+    "jsdom": "27.0.1",
+    "prettier": "3.9.5",
+    "tsx": "4.23.1",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.64.0",
+    "vitest": "4.1.10"
+  }
+}

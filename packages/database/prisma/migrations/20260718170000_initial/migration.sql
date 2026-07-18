@@ -1,0 +1,2 @@
+-- The foundation intentionally has no domain tables yet.
+-- WAL is requested at runtime because journal mode is connection/environment dependent.

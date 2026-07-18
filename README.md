@@ -1,45 +1,131 @@
 # Receipt Report
 
-A personal, self-hosted application for turning German grocery receipts into a
-searchable spending history. Receipt images and PDFs are processed by a
-configurable multimodal AI provider, reviewed by the user, and summarized in
-weekly and monthly reports.
+Receipt Report is a personal, self-hosted application for turning German grocery receipts into a searchable spending history. It is currently an executable foundation: the web app, API, worker, SQLite database, tests, and container boundaries are in place; receipt ingestion and reporting workflows come next.
 
-This repository is currently in the planning and foundation phase. See
-[`docs/product.md`](docs/product.md) for scope and [`docs/roadmap.md`](docs/roadmap.md)
-for the intended delivery order.
+## Prerequisites
 
-## Intended stack
+- Node.js 24 (see `.nvmrc`)
+- pnpm 11.14.0 through Corepack
+- Docker with Compose v2 for container workflows
 
-- TypeScript in a pnpm workspace
-- React and Vite for the web client
-- Express for the REST API
-- Prisma with SQLite
-- Zod for runtime validation and shared contracts
-- A separate worker process for asynchronous receipt processing
-- Local filesystem storage for receipt images and PDFs
-- Vitest for unit and integration tests with enforced coverage thresholds
-- Playwright for browser tests from the first user-facing workflow
+## Quick start
 
-The stack is recorded in [`docs/architecture.md`](docs/architecture.md). Changes
-to foundational decisions should be captured in `docs/decisions/`.
+```bash
+corepack enable
+corepack prepare pnpm@11.14.0 --activate
+pnpm install --frozen-lockfile
+cp .env.example .env
 
-Testing expectations are defined in [`docs/testing.md`](docs/testing.md).
+# Apply the SQLite schema, then start web, API, and worker in watch mode
+set -a; . ./.env; set +a
+pnpm --filter @receipt-report/database db:migrate:deploy
+pnpm dev
+```
 
-## Development status
+Open <http://127.0.0.1:5173>. Vite proxies same-origin `/api` requests to the API at <http://127.0.0.1:3000>. Local databases, documents, and worker state live under `.runtime/`, which Git ignores.
 
-No application has been scaffolded yet. Work should be driven by small issues
-with explicit acceptance criteria. Issues carrying the `agent-ready` label are
-expected to be implementable without additional product decisions and to have
-completed an independent Claude specification review. Implementation pull
-requests receive Claude code review before merge so agents can cross-check one
-another.
+Stop all development processes with `Ctrl+C`.
 
-The complete handoff and cross-review process is documented in
-[`docs/agent-workflow.md`](docs/agent-workflow.md).
+## Common commands
 
-## Data and privacy
+| Command               | Purpose                                            |
+| --------------------- | -------------------------------------------------- |
+| `pnpm dev`            | Start web, API, and worker in watch mode           |
+| `pnpm build`          | Create production builds for every package and app |
+| `pnpm test`           | Run unit and integration tests                     |
+| `pnpm test:coverage`  | Run tests and enforce coverage thresholds          |
+| `pnpm test:e2e`       | Build and run the Playwright smoke test            |
+| `pnpm format`         | Format the repository with Prettier                |
+| `pnpm format:check`   | Check formatting without modifying files           |
+| `pnpm lint`           | Run ESLint                                         |
+| `pnpm typecheck`      | Run strict TypeScript checks                       |
+| `pnpm compose:config` | Validate the resolved Compose configuration        |
+| `pnpm compose:smoke`  | Build and verify an isolated Compose deployment    |
 
-This is a private, single-user application. Receipt documents and extracted data
-may contain sensitive information. Secrets, receipt documents, databases, and
-real email content must never be committed to Git.
+Install Playwright's browser once before running E2E tests locally:
+
+```bash
+pnpm exec playwright install chromium
+pnpm test:e2e
+```
+
+Coverage HTML is written to `coverage/index.html`. Playwright writes its report to `playwright-report/` and failure traces, screenshots, and videos to `test-results/`.
+
+## Database commands
+
+The default `.env` uses SQLite at `.runtime/development.db`.
+
+```bash
+# Regenerate the Prisma client after changing the schema
+pnpm --filter @receipt-report/database db:generate
+
+# Apply committed migrations
+pnpm --filter @receipt-report/database db:migrate:deploy
+```
+
+API and worker processes request SQLite WAL mode when they start. If the filesystem cannot provide WAL, they emit a warning and continue; network filesystems are not supported for the initial deployment.
+
+## Docker Compose
+
+```bash
+docker compose up --build --wait
+curl --fail http://127.0.0.1:3000/api/v1/health
+docker compose down
+```
+
+Compose applies migrations once before starting the API and worker. The API serves the built web app at <http://127.0.0.1:3000>. Persistent database and document data lives in the `receipt-data` volume.
+
+Use another host port if 3000 is occupied:
+
+```bash
+RECEIPT_REPORT_PORT=8080 docker compose up --build --wait
+```
+
+To remove the local Compose data volume as well as its containers:
+
+```bash
+docker compose down --volumes
+```
+
+## Production without Compose
+
+```bash
+pnpm install --frozen-lockfile
+pnpm build
+
+export DATABASE_URL=file:../../.runtime/production.db
+export STORAGE_PATH=../../.runtime/storage
+pnpm --filter @receipt-report/database db:migrate:deploy
+
+WEB_DIST_DIR=../web/dist \
+pnpm --filter @receipt-report/api start
+```
+
+Run the worker separately with the same database and storage configuration:
+
+```bash
+WORKER_READY_FILE=../../.runtime/worker.ready \
+pnpm --filter @receipt-report/worker start
+```
+
+## Repository layout
+
+```text
+apps/
+  api/          Express API and production web serving
+  web/          React/Vite client
+  worker/       Background worker process
+packages/
+  config/       Validated runtime configuration
+  contracts/    Shared API contracts
+  database/     Prisma schema, migrations, and SQLite helpers
+  receipt-ai/   Provider-neutral AI integration boundary
+docs/           Product, architecture, testing, and workflow documentation
+scripts/        Repository automation and Compose smoke checks
+```
+
+Start with [`docs/product.md`](docs/product.md) for scope, [`docs/roadmap.md`](docs/roadmap.md) for delivery order, and [`docs/architecture.md`](docs/architecture.md) for system boundaries.
+
+## Privacy
+
+Receipt documents and extracted data may contain sensitive information. Never commit `.env` files, credentials, databases, real receipt documents, real email content, or sensitive logs. Automated tests use isolated SQLite files and synthetic, secret-free fixtures.
