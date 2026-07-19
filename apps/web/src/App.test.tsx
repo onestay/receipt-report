@@ -235,17 +235,15 @@ describe("application shell", () => {
   it("moves focus to the heading after persistent navigation", async () => {
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn()
-        .mockResolvedValue(
-          new Response(JSON.stringify({ receipts: [], nextCursor: null }), {
-            status: 200,
-          }),
-        ),
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ receipts: [], nextCursor: null }), {
+          status: 200,
+        }),
+      ),
     );
     render(<App />);
     fireEvent.click(screen.getByRole("link", { name: "New receipt" }));
-    expect(screen.getByRole("heading", { name: "New receipt" })).toHaveFocus();
+    expect(screen.getByLabelText("Merchant")).toHaveFocus();
     fireEvent.click(screen.getByRole("link", { name: "Ledger" }));
     expect(
       screen.getByRole("heading", { name: "Purchases, clearly kept." }),
