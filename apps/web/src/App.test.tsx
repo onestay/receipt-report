@@ -389,6 +389,63 @@ describe("receipt editor", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(screen.getByText("Receipt saved.")).toBeInTheDocument();
   });
+  it("distinguishes unchanged, saving, and saved button states", async () => {
+    history.replaceState({}, "", `/receipts/${receipt.id}`);
+    let finishSave: ((response: Response) => void) | undefined;
+    const saveResponse = new Promise<Response>((resolve) => {
+      finishSave = resolve;
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(receipt), { status: 200 }),
+      )
+      .mockReturnValueOnce(saveResponse);
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    const button = await screen.findByRole("button", {
+      name: "Save changes",
+    });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("aria-busy", "false");
+
+    fireEvent.change(screen.getByLabelText("Merchant"), {
+      target: { value: "Changed Markt" },
+    });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    await waitFor(() => expect(button).toHaveAttribute("aria-busy", "true"));
+    expect(button).toBeDisabled();
+
+    finishSave?.(new Response(JSON.stringify(receipt), { status: 200 }));
+    await waitFor(() => expect(button).toHaveAttribute("aria-busy", "false"));
+    expect(button).toBeDisabled();
+  });
+  it("clears the busy state and re-enables saving after failure", async () => {
+    history.replaceState({}, "", `/receipts/${receipt.id}`);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(receipt), { status: 200 }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 500 }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    const button = await screen.findByRole("button", {
+      name: "Save changes",
+    });
+    fireEvent.change(screen.getByLabelText("Merchant"), {
+      target: { value: "Changed Markt" },
+    });
+    fireEvent.click(button);
+    expect(
+      await screen.findByText(
+        "Could not save. Your changes are still here; try again.",
+      ),
+    ).toBeInTheDocument();
+    expect(button).toBeEnabled();
+    expect(button).toHaveAttribute("aria-busy", "false");
+  });
   it("shows not-found and retryable load states", async () => {
     history.replaceState({}, "", `/receipts/${receipt.id}`);
     vi.stubGlobal(
