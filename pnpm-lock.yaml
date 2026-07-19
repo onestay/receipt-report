@@ -56,6 +56,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@prisma/client':
+        specifier: 6.19.0
+        version: 6.19.0(prisma@6.19.0(typescript@5.9.3))(typescript@5.9.3)
       '@receipt-report/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -68,6 +71,9 @@ importers:
       express:
         specifier: 5.2.1
         version: 5.2.1
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
     devDependencies:
       '@types/express':
         specifier: 5.0.6

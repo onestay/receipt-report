@@ -17,7 +17,9 @@ export async function startServer(
   reportJournalMode(journalMode);
 
   const app = createApp(
-    config.WEB_DIST_DIR ? { webDistDirectory: config.WEB_DIST_DIR } : {},
+    config.WEB_DIST_DIR
+      ? { database, webDistDirectory: config.WEB_DIST_DIR }
+      : { database },
   );
   const server = app.listen(config.PORT, config.HOST);
   await new Promise<void>((resolveListening, reject) => {

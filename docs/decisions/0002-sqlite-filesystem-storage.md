@@ -21,3 +21,8 @@ Deployment and backup are simple, but the database and document directory must
 be backed up consistently. PDF rendering adds a local processing dependency and
 derived page files. Multi-instance writes and horizontal scaling are not initial
 design goals.
+
+Before applying a database migration, stop writers and back up the SQLite file
+(including any WAL sidecar) or the complete persistent volume. Migrations are
+forward-only; recovery is restoration of that consistent pre-migration backup,
+followed by redeployment of the previous application version.

@@ -9,6 +9,7 @@ This document captures concepts rather than a final database schema.
 - Merchant name and optional address
 - Purchase date and optional time
 - Currency, initially EUR
+- Optional user notes
 - Subtotal, discounts, deposits, tax, and total when present
 - Payment method when present
 - Original model values and user-approved values
@@ -45,6 +46,14 @@ input for review and AI providers.
 
 All monetary values must use integer minor units in domain and persistence code.
 Floating-point numbers must not be used for money.
+
+In the manual ledger, quantity is an optional positive integer in thousandths
+(`quantityMilli`), and ordered line items are persisted by their zero-based
+position. Quantity, unit price, line total, and receipt total are independently
+entered; reconciliation belongs to a later review workflow.
+Manual-ledger amounts are non-negative; modeling discounts, returns, and deposit
+refunds as signed lines is intentionally deferred to the later extraction and
+review domain.
 
 ## Processing attempt
 

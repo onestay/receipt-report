@@ -10,10 +10,12 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@prisma/client": "6.19.0",
     "@receipt-report/config": "workspace:*",
     "@receipt-report/contracts": "workspace:*",
     "@receipt-report/database": "workspace:*",
-    "express": "5.2.1"
+    "express": "5.2.1",
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "@types/express": "5.0.6",
