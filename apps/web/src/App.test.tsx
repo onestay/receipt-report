@@ -8,11 +8,18 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { App, formatDate, parseMoney } from "./App.js";
+import {
+  App,
+  formatDate,
+  lineTotalSum,
+  parseMoney,
+  parseQuantity,
+} from "./App.js";
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   history.replaceState({}, "", "/");
 });
 
@@ -164,7 +171,7 @@ describe("application shell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save receipt" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(
-      await screen.findByRole("heading", { name: "Ready for detail." }),
+      await screen.findByRole("heading", { name: "Could not open receipt" }),
     ).toBeInTheDocument();
   });
 
@@ -226,10 +233,12 @@ describe("application shell", () => {
 
   it("renders a direct detail route", () => {
     history.replaceState({}, "", "/receipts/cm12345678901234567890123");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(null, { status: 404 })),
+    );
     render(<App />);
-    expect(
-      screen.getByRole("heading", { name: "Ready for detail." }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Loading receipt");
   });
 
   it("moves focus to the heading after persistent navigation", async () => {
@@ -248,5 +257,280 @@ describe("application shell", () => {
     expect(
       screen.getByRole("heading", { name: "Purchases, clearly kept." }),
     ).toHaveFocus();
+  });
+});
+
+describe("receipt editor", () => {
+  const receipt = {
+    id: "cm12345678901234567890123",
+    merchant: "Synthetic Markt",
+    purchaseDate: "2026-07-19",
+    purchaseTime: null,
+    currency: "EUR",
+    notes: "",
+    totalCents: 300,
+    createdAt: "2026-07-19T00:00:00.000Z",
+    updatedAt: "2026-07-19T00:00:00.000Z",
+    lineItems: [
+      {
+        id: "cm22345678901234567890123",
+        position: 0,
+        description: "Apfel",
+        quantityMilli: 1000,
+        unitPriceCents: 100,
+        lineTotalCents: 100,
+      },
+      {
+        id: "cm32345678901234567890123",
+        position: 1,
+        description: "Brot",
+        quantityMilli: null,
+        unitPriceCents: null,
+        lineTotalCents: 200,
+      },
+    ],
+  };
+  it("parses quantities and totals deterministically", () => {
+    expect(parseQuantity("0,485")).toBe(485);
+    expect(parseQuantity("1.5")).toBe(1500);
+    expect(parseQuantity("0")).toBeNull();
+    expect(parseQuantity("1,2345")).toBeNull();
+    expect(
+      lineTotalSum({
+        merchant: "",
+        purchaseDate: "",
+        purchaseTime: "",
+        total: "",
+        notes: "",
+        items: [
+          {
+            key: "a",
+            description: "",
+            quantity: "",
+            unitPrice: "",
+            lineTotal: "1,00",
+          },
+          {
+            key: "b",
+            description: "",
+            quantity: "",
+            unitPrice: "",
+            lineTotal: "2,00",
+          },
+        ],
+      }),
+    ).toBe(300);
+  });
+  it("loads, edits, reorders, validates, and saves atomically", async () => {
+    history.replaceState({}, "", `/receipts/${receipt.id}`);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(receipt), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(receipt), { status: 200 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    expect(
+      await screen.findByRole("heading", { name: "Edit receipt" }),
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Merchant"), {
+      target: { value: "Changed Markt" },
+    });
+    fireEvent.change(screen.getByLabelText("Purchase date"), {
+      target: { value: "2026-07-18" },
+    });
+    fireEvent.change(screen.getByLabelText("Time"), {
+      target: { value: "12:30" },
+    });
+    fireEvent.change(screen.getByLabelText("Notes"), {
+      target: { value: "Changed note" },
+    });
+    const quantity = screen.getAllByLabelText("Quantity")[0];
+    const unitPrice = screen.getAllByLabelText("Unit price")[0];
+    if (!quantity || !unitPrice) throw new Error("Item fields missing");
+    fireEvent.change(quantity, {
+      target: { value: "0,485" },
+    });
+    fireEvent.change(unitPrice, {
+      target: { value: "2,00" },
+    });
+    fireEvent.change(screen.getByLabelText("Receipt total"), {
+      target: { value: "4,00" },
+    });
+    expect(screen.getByRole("status", { name: "" })).toHaveTextContent(
+      "Difference",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Move item 2 up" }));
+    await waitFor(() =>
+      expect(screen.getAllByLabelText("Description")[0]).toHaveFocus(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Remove item 2" }));
+    await waitFor(() =>
+      expect(screen.getAllByLabelText("Description")[0]).toHaveFocus(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Add item/ }));
+    const descriptions = screen.getAllByLabelText("Description");
+    const description = descriptions.at(-1);
+    const totals = screen.getAllByLabelText("Line total");
+    const itemTotal = totals.at(-1);
+    if (!description || !itemTotal) throw new Error("New item fields missing");
+    await waitFor(() => expect(description).toHaveFocus());
+    fireEvent.change(description, { target: { value: "Milch" } });
+    fireEvent.change(itemTotal, { target: { value: "bad" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(
+      await screen.findByText("Enter a valid amount."),
+    ).toBeInTheDocument();
+    fireEvent.change(itemTotal, { target: { value: "1,00" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(screen.getByText("Receipt saved.")).toBeInTheDocument();
+  });
+  it("shows not-found and retryable load states", async () => {
+    history.replaceState({}, "", `/receipts/${receipt.id}`);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(null, { status: 404 })),
+    );
+    render(<App />);
+    expect(
+      await screen.findByRole("heading", { name: "Receipt not found" }),
+    ).toBeInTheDocument();
+  });
+  it("retries a failed load", async () => {
+    history.replaceState({}, "", `/receipts/${receipt.id}`);
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(receipt), { status: 200 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+    expect(
+      await screen.findByRole("heading", { name: "Edit receipt" }),
+    ).toBeInTheDocument();
+  });
+  it("deletes only after confirmation", async () => {
+    history.replaceState({}, "", `/receipts/${receipt.id}`);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(receipt), { status: 200 }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(location.pathname).toBe("/receipts"));
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ method: "DELETE" });
+  });
+  it("keeps a receipt when deletion is declined", async () => {
+    history.replaceState({}, "", `/receipts/${receipt.id}`);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify(receipt), { status: 200 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    expect(
+      screen.getByRole("heading", { name: "Edit receipt" }),
+    ).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+  it("guards dirty navigation and browser unload", async () => {
+    history.replaceState({}, "", `/receipts/${receipt.id}`);
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify(receipt), { status: 200 }),
+        ),
+    );
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<App />);
+    await screen.findByRole("heading", { name: "Edit receipt" });
+    fireEvent.change(screen.getByLabelText("Merchant"), {
+      target: { value: "Dirty Markt" },
+    });
+    fireEvent.click(screen.getByRole("link", { name: "← Ledger" }));
+    expect(confirm).toHaveBeenCalledWith("Discard your unsaved changes?");
+    expect(location.pathname).toBe(`/receipts/${receipt.id}`);
+    const unload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(true);
+    confirm.mockReturnValue(true);
+    fireEvent.click(screen.getByRole("link", { name: "← Ledger" }));
+    expect(location.pathname).toBe("/receipts");
+  });
+  it("does not guard unload while clean", async () => {
+    history.replaceState({}, "", `/receipts/${receipt.id}`);
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify(receipt), { status: 200 }),
+        ),
+    );
+    render(<App />);
+    await screen.findByRole("heading", { name: "Edit receipt" });
+    const unload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(false);
+  });
+  it("restores the receipt after a cancelled browser back navigation", async () => {
+    history.replaceState({}, "", "/receipts");
+    history.pushState({}, "", `/receipts/${receipt.id}`);
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify(receipt), { status: 200 }),
+        ),
+    );
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<App />);
+    await screen.findByRole("heading", { name: "Edit receipt" });
+    fireEvent.change(screen.getByLabelText("Merchant"), {
+      target: { value: "Dirty Markt" },
+    });
+    history.back();
+    await waitFor(() =>
+      expect(window.confirm).toHaveBeenCalledWith(
+        "Discard your unsaved changes?",
+      ),
+    );
+    await waitFor(() =>
+      expect(location.pathname).toBe(`/receipts/${receipt.id}`),
+    );
+  });
+  it("focuses Add item after removing the final line item", async () => {
+    const oneItem = { ...receipt, lineItems: receipt.lineItems.slice(0, 1) };
+    history.replaceState({}, "", `/receipts/${receipt.id}`);
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify(oneItem), { status: 200 }),
+        ),
+    );
+    render(<App />);
+    await screen.findByRole("heading", { name: "Edit receipt" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove item 1" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Add item/ })).toHaveFocus(),
+    );
   });
 });
