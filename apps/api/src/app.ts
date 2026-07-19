@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import express, { type ErrorRequestHandler, type Express } from "express";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
@@ -91,9 +91,13 @@ export function createApp(options: AppOptions = {}): Express {
   if (options.webDistDirectory) {
     const webDistDirectory = resolve(options.webDistDirectory);
     if (existsSync(webDistDirectory)) {
+      const indexHtml = readFileSync(
+        resolve(webDistDirectory, "index.html"),
+        "utf8",
+      );
       app.use(express.static(webDistDirectory));
       app.get("/{*path}", (_request, response) =>
-        response.sendFile(resolve(webDistDirectory, "index.html")),
+        response.type("html").send(indexHtml),
       );
     }
   }

@@ -1,4 +1,5 @@
 import { defineConfig } from "@playwright/test";
+import { resolve } from "node:path";
 
 const port = 4173;
 
@@ -12,13 +13,14 @@ export default defineConfig({
   },
   reporter: [["list"], ["html", { open: "never" }]],
   webServer: {
-    command: "pnpm --filter @receipt-report/api start",
+    command:
+      "pnpm --filter @receipt-report/database db:migrate:deploy && pnpm --filter @receipt-report/api start",
     env: {
       ...process.env,
       PORT: String(port),
       HOST: "127.0.0.1",
-      DATABASE_URL: "file:../../.runtime/e2e.db",
-      STORAGE_PATH: "../../.runtime/e2e-storage",
+      DATABASE_URL: `file:${resolve(".runtime/e2e.db")}`,
+      STORAGE_PATH: resolve(".runtime/e2e-storage"),
       WEB_DIST_DIR: "../web/dist",
     },
     port,
