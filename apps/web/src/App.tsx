@@ -58,7 +58,7 @@ export function App() {
   useEffect(() => {
     document.title = `${current.page === "list" ? "Ledger" : current.page === "new" ? "New receipt" : "Receipt detail"} · Receipt Report`;
     const heading = document.querySelector<HTMLElement>("main h1");
-    if (heading && document.activeElement === document.body) {
+    if (heading) {
       heading.tabIndex = -1;
       heading.focus();
     }
