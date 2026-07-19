@@ -168,6 +168,62 @@ describe("application shell", () => {
     ).toBeInTheDocument();
   });
 
+  it.each([
+    [
+      "server",
+      new Response(
+        JSON.stringify({
+          error: { code: "internal_error", message: "hidden" },
+        }),
+        { status: 500 },
+      ),
+      "may not have been saved",
+    ],
+    [
+      "invalid confirmation",
+      new Response(JSON.stringify({ id: "bad" }), { status: 201 }),
+      "confirmation was incomplete",
+    ],
+  ])("preserves input after a %s failure", async (_name, response, message) => {
+    history.replaceState({}, "", "/receipts/new");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Merchant"), {
+      target: { value: "Synthetic" },
+    });
+    fireEvent.change(screen.getByLabelText("Purchase date"), {
+      target: { value: "2026-07-19" },
+    });
+    fireEvent.change(screen.getByLabelText("Total"), {
+      target: { value: "12,34" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save receipt" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
+    expect(screen.getByLabelText("Merchant")).toHaveValue("Synthetic");
+  });
+
+  it("uses an ambiguity-safe message for a network failure", async () => {
+    history.replaceState({}, "", "/receipts/new");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new TypeError("raw failure")),
+    );
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Merchant"), {
+      target: { value: "Synthetic" },
+    });
+    fireEvent.change(screen.getByLabelText("Purchase date"), {
+      target: { value: "2026-07-19" },
+    });
+    fireEvent.change(screen.getByLabelText("Total"), {
+      target: { value: "12,34" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save receipt" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("may not have been saved");
+    expect(alert).not.toHaveTextContent("raw failure");
+  });
+
   it("renders a direct detail route", () => {
     history.replaceState({}, "", "/receipts/cm12345678901234567890123");
     render(<App />);

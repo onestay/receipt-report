@@ -55,6 +55,14 @@ export function App() {
     window.addEventListener("popstate", update);
     return () => window.removeEventListener("popstate", update);
   }, []);
+  useEffect(() => {
+    document.title = `${current.page === "list" ? "Ledger" : current.page === "new" ? "New receipt" : "Receipt detail"} · Receipt Report`;
+    const heading = document.querySelector<HTMLElement>("main h1");
+    if (heading && document.activeElement === document.body) {
+      heading.tabIndex = -1;
+      heading.focus();
+    }
+  }, [current]);
   return (
     <div className="app">
       <header className="masthead">
@@ -262,19 +270,24 @@ function CreateReceipt() {
       });
       if (!response.ok) {
         const parsed = apiErrorSchema.safeParse(await response.json());
-        throw new Error(
+        setServerError(
           parsed.success && parsed.data.error.code === "validation_error"
             ? "Please check the entered values."
             : "The receipt may not have been saved. Check the ledger before retrying.",
         );
+        return;
       }
-      const created = receiptDetailSchema.parse(await response.json());
-      navigate(`/receipts/${created.id}`);
-    } catch (error) {
+      const created = receiptDetailSchema.safeParse(await response.json());
+      if (!created.success) {
+        setServerError(
+          "The receipt may have been saved, but confirmation was incomplete. Check the ledger before retrying.",
+        );
+        return;
+      }
+      navigate(`/receipts/${created.data.id}`);
+    } catch {
       setServerError(
-        error instanceof Error
-          ? error.message
-          : "The receipt could not be saved.",
+        "The receipt may not have been saved. Check the ledger before retrying.",
       );
     } finally {
       setSubmitting(false);
@@ -331,9 +344,14 @@ function CreateReceipt() {
             name="purchaseDate"
             type="date"
             aria-invalid={!!errors.purchaseDate}
+            aria-describedby={
+              errors.purchaseDate ? "purchaseDate-error" : undefined
+            }
           />
           {errors.purchaseDate && (
-            <small className="field-error">{errors.purchaseDate}</small>
+            <small id="purchaseDate-error" className="field-error">
+              {errors.purchaseDate}
+            </small>
           )}
         </div>
         <div className="field">
@@ -352,10 +370,13 @@ function CreateReceipt() {
               inputMode="decimal"
               placeholder="0,00"
               aria-invalid={!!errors.total}
+              aria-describedby={errors.total ? "total-error" : undefined}
             />
           </div>
           {errors.total && (
-            <small className="field-error">{errors.total}</small>
+            <small id="total-error" className="field-error">
+              {errors.total}
+            </small>
           )}
         </div>
         <div className="field field--wide">
