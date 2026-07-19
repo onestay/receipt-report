@@ -19,6 +19,7 @@ import {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   history.replaceState({}, "", "/");
 });
 
@@ -363,6 +364,9 @@ describe("receipt editor", () => {
       "Difference",
     );
     fireEvent.click(screen.getByRole("button", { name: "Move item 2 up" }));
+    await waitFor(() =>
+      expect(screen.getAllByLabelText("Description")[0]).toHaveFocus(),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Remove item 2" }));
     fireEvent.click(screen.getByRole("button", { name: /Add item/ }));
     const descriptions = screen.getAllByLabelText("Description");
@@ -370,6 +374,7 @@ describe("receipt editor", () => {
     const totals = screen.getAllByLabelText("Line total");
     const itemTotal = totals.at(-1);
     if (!description || !itemTotal) throw new Error("New item fields missing");
+    await waitFor(() => expect(description).toHaveFocus());
     fireEvent.change(description, { target: { value: "Milch" } });
     fireEvent.change(itemTotal, { target: { value: "bad" } });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
@@ -421,5 +426,47 @@ describe("receipt editor", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
     await waitFor(() => expect(location.pathname).toBe("/receipts"));
     expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ method: "DELETE" });
+  });
+  it("keeps a receipt when deletion is declined", async () => {
+    history.replaceState({}, "", `/receipts/${receipt.id}`);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify(receipt), { status: 200 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    expect(
+      screen.getByRole("heading", { name: "Edit receipt" }),
+    ).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+  it("guards dirty navigation and browser unload", async () => {
+    history.replaceState({}, "", `/receipts/${receipt.id}`);
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify(receipt), { status: 200 }),
+        ),
+    );
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<App />);
+    await screen.findByRole("heading", { name: "Edit receipt" });
+    fireEvent.change(screen.getByLabelText("Merchant"), {
+      target: { value: "Dirty Markt" },
+    });
+    fireEvent.click(screen.getByRole("link", { name: "← Ledger" }));
+    expect(confirm).toHaveBeenCalledWith("Discard your unsaved changes?");
+    expect(location.pathname).toBe(`/receipts/${receipt.id}`);
+    const unload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(true);
+    confirm.mockReturnValue(true);
+    fireEvent.click(screen.getByRole("link", { name: "← Ledger" }));
+    expect(location.pathname).toBe("/receipts");
   });
 });
