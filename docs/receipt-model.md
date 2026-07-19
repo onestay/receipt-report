@@ -55,6 +55,10 @@ Manual-ledger amounts are non-negative; modeling discounts, returns, and deposit
 refunds as signed lines is intentionally deferred to the later extraction and
 review domain.
 
+The manual editor treats the explicit receipt total and the integer sum of line
+totals as separate user-entered values. A discrepancy is visible but does not
+block saving, and quantity or unit price never derives or validates a line total.
+
 ## Processing attempt
 
 - Receipt, document, and page references

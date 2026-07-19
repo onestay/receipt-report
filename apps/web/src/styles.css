@@ -388,3 +388,146 @@ code {
     transition: none !important;
   }
 }
+
+.editor {
+  max-width: 68rem;
+  margin: auto;
+}
+.editor-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+.editor-heading h1 {
+  margin: 0;
+}
+.editor-actions {
+  display: flex;
+  gap: 0.7rem;
+}
+.editor-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 17rem;
+  gap: 1.5rem;
+  align-items: start;
+}
+.editor-fields {
+  margin: 0 0 2rem;
+}
+.items {
+  display: grid;
+  gap: 1rem;
+}
+.items .section-heading {
+  margin: 0;
+}
+.item {
+  padding: 1.2rem;
+}
+.item-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+.item-title button {
+  min-width: 2.5rem;
+  min-height: 2.5rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--forest);
+  font-weight: 750;
+  cursor: pointer;
+}
+.item-title button:hover:not(:disabled) {
+  background: var(--sage);
+}
+.item-title button:disabled {
+  opacity: 0.35;
+}
+.danger,
+.danger-text {
+  color: #8c2f27 !important;
+  border-color: #a84a40 !important;
+}
+.danger {
+  background: transparent;
+}
+.danger:hover {
+  background: #fff0eb;
+}
+.item-fields {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1fr;
+  gap: 1rem;
+}
+.totals {
+  position: sticky;
+  top: 1rem;
+  padding: 1.3rem;
+}
+.totals p {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  color: var(--muted);
+}
+.totals strong {
+  color: var(--ink);
+  font-family: Georgia, serif;
+  font-variant-numeric: tabular-nums;
+}
+.reconcile {
+  padding: 0.8rem;
+  border-radius: 0.6rem;
+  background: #e7f0e3;
+  color: var(--forest);
+  font-weight: 750;
+}
+.reconcile--different {
+  background: #fff0df;
+  color: #8a4d1d;
+}
+.save-status {
+  margin-top: 1rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+@media (max-width: 800px) {
+  .editor-grid {
+    grid-template-columns: 1fr;
+  }
+  .totals {
+    position: static;
+    order: -1;
+  }
+  .item-fields {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+@media (max-width: 520px) {
+  .editor-heading {
+    display: block;
+  }
+  .editor-actions {
+    margin-top: 1rem;
+  }
+  .editor-actions > * {
+    flex: 1;
+  }
+  .item-fields {
+    grid-template-columns: 1fr;
+  }
+  .item-title {
+    align-items: start;
+  }
+  .item-title > div {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+}

@@ -1,31 +1,52 @@
 import { expect, test } from "@playwright/test";
 
-test("creates a receipt through the real stack and supports direct routes", async ({
+test("creates, edits, reorders, saves, reloads, and deletes a receipt", async ({
   page,
 }) => {
-  await page.goto("/receipts");
-  await expect(
-    page.getByRole("heading", { name: "Purchases, clearly kept." }),
-  ).toBeVisible();
-  await page.getByRole("link", { name: "Add a receipt" }).click();
+  await page.goto("/receipts/new");
   await page.getByLabel("Merchant").fill("Synthetic Browser Markt");
   await page.getByLabel("Purchase date").fill("2026-07-19");
-  await page.getByLabel("Total").fill("12,34");
+  await page.getByLabel("Total").fill("3,00");
   await page.getByRole("button", { name: "Save receipt" }).click();
-  await expect(page).toHaveURL(/\/receipts\/[a-z0-9]+$/);
   await expect(
-    page.getByRole("heading", { name: "Ready for detail." }),
+    page.getByRole("heading", { name: "Edit receipt" }),
   ).toBeVisible();
+  await page.getByRole("button", { name: /Add item/ }).click();
+  await page.getByLabel("Description").fill("Synthetic apples");
+  await page.getByLabel("Line total").fill("1,00");
+  await page.getByRole("button", { name: /Add item/ }).click();
+  await page.getByLabel("Description").nth(1).fill("Synthetic bread");
+  await page.getByLabel("Line total").nth(1).fill("1,50");
+  await expect(
+    page.getByRole("status").filter({ hasText: "Difference" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Move item 2 up" }).click();
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText("Receipt saved.")).toBeVisible();
   await page.reload();
-  await expect(
-    page.getByRole("heading", { name: "Ready for detail." }),
-  ).toBeVisible();
+  await expect(page.getByLabel("Description").first()).toHaveValue(
+    "Synthetic bread",
+  );
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Delete" }).click();
+  await expect(page).toHaveURL(/\/receipts$/);
 });
 
-test("mobile navigation has no horizontal overflow", async ({ page }) => {
+test("mobile editor has no horizontal overflow", async ({ page, request }) => {
+  const response = await request.post("/api/v1/receipts", {
+    data: {
+      merchant: "Synthetic Mobile Markt",
+      purchaseDate: "2026-07-19",
+      totalCents: 100,
+      lineItems: [],
+    },
+  });
+  const receipt = (await response.json()) as { id: string };
   await page.setViewportSize({ width: 320, height: 720 });
-  await page.goto("/receipts/new");
-  await expect(page.getByRole("link", { name: "New receipt" })).toBeVisible();
+  await page.goto(`/receipts/${receipt.id}`);
+  await expect(
+    page.getByRole("heading", { name: "Edit receipt" }),
+  ).toBeVisible();
   expect(
     await page.evaluate(
       () =>
