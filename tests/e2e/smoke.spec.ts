@@ -11,6 +11,9 @@ test("creates, edits, reorders, saves, reloads, and deletes a receipt", async ({
   await expect(
     page.getByRole("heading", { name: "Edit receipt" }),
   ).toBeVisible();
+  const saveButton = page.getByRole("button", { name: "Save changes" });
+  await expect(saveButton).toBeDisabled();
+  await expect(saveButton).toHaveCSS("cursor", "not-allowed");
   await page.getByRole("button", { name: /Add item/ }).click();
   await page.getByLabel("Description").fill("Synthetic apples");
   await page.getByLabel("Line total").fill("1,00");
@@ -21,7 +24,20 @@ test("creates, edits, reorders, saves, reloads, and deletes a receipt", async ({
     page.getByRole("status").filter({ hasText: "Difference" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Move item 2 up" }).click();
-  await page.getByRole("button", { name: "Save changes" }).click();
+  let releaseSave: (() => void) | undefined;
+  const saveGate = new Promise<void>((resolve) => {
+    releaseSave = resolve;
+  });
+  await page.route("**/api/v1/receipts/*", async (route) => {
+    if (route.request().method() === "PATCH") await saveGate;
+    await route.continue();
+  });
+  await saveButton.click();
+  await expect(page.getByRole("button", { name: "Saving…" })).toHaveCSS(
+    "cursor",
+    "wait",
+  );
+  releaseSave?.();
   await expect(page.getByText("Receipt saved.")).toBeVisible();
   await page.reload();
   await expect(page.getByLabel("Description").first()).toHaveValue(

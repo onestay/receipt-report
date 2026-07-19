@@ -168,6 +168,9 @@ h1 {
 }
 .button:disabled {
   opacity: 0.6;
+  cursor: not-allowed;
+}
+.button:disabled[aria-busy="true"] {
   cursor: wait;
 }
 .button--small {

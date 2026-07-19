@@ -232,6 +232,7 @@ function ReceiptList() {
             <button
               className="button button--quiet"
               disabled={state === "loading"}
+              aria-busy={state === "loading"}
               onClick={() => void load(cursor)}
             >
               {state === "loading" ? "Loading…" : "Load more"}
@@ -429,7 +430,11 @@ function CreateReceipt() {
           <Link href="/receipts" className="button button--quiet">
             Cancel
           </Link>
-          <button className="button" disabled={submitting}>
+          <button
+            className="button"
+            disabled={submitting}
+            aria-busy={submitting}
+          >
             {submitting ? "Saving…" : "Save receipt"}
           </button>
         </div>
@@ -707,6 +712,7 @@ function ReceiptEditor({ id }: { id: string }) {
           <button
             className="button"
             disabled={saving || !dirty}
+            aria-busy={saving}
             onClick={() => void save()}
           >
             {saving ? "Saving…" : "Save changes"}
