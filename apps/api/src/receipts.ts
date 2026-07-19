@@ -142,52 +142,41 @@ export class ReceiptRepository {
   }
 
   async update(id: string, input: ReceiptUpdate): Promise<ReceiptDetail> {
-    try {
-      const record = await this.database.$transaction(async (transaction) => {
-        const existing = await transaction.receipt.findUnique({
-          where: { id },
-        });
-        if (!existing) throw new ReceiptNotFoundError("Receipt not found");
-        if (input.lineItems) {
-          await transaction.lineItem.deleteMany({ where: { receiptId: id } });
-        }
-        return transaction.receipt.update({
-          where: { id },
-          data: {
-            ...(input.merchant === undefined
-              ? {}
-              : { merchant: input.merchant }),
-            ...(input.purchaseDate === undefined
-              ? {}
-              : { purchaseDate: input.purchaseDate }),
-            ...(input.purchaseTime === undefined
-              ? {}
-              : { purchaseTime: input.purchaseTime }),
-            ...(input.currency === undefined
-              ? {}
-              : { currency: input.currency }),
-            ...(input.notes === undefined
-              ? {}
-              : { notes: input.notes || null }),
-            ...(input.totalCents === undefined
-              ? {}
-              : { totalCents: input.totalCents }),
-            ...(input.lineItems === undefined
-              ? {}
-              : {
-                  lineItems: {
-                    create: input.lineItems.map(itemData),
-                  },
-                }),
-          },
-          include: receiptInclude,
-        });
+    const record = await this.database.$transaction(async (transaction) => {
+      const existing = await transaction.receipt.findUnique({
+        where: { id },
       });
-      return detail(record);
-    } catch (error) {
-      if (error instanceof ReceiptNotFoundError) throw error;
-      throw error;
-    }
+      if (!existing) throw new ReceiptNotFoundError("Receipt not found");
+      if (input.lineItems) {
+        await transaction.lineItem.deleteMany({ where: { receiptId: id } });
+      }
+      return transaction.receipt.update({
+        where: { id },
+        data: {
+          ...(input.merchant === undefined ? {} : { merchant: input.merchant }),
+          ...(input.purchaseDate === undefined
+            ? {}
+            : { purchaseDate: input.purchaseDate }),
+          ...(input.purchaseTime === undefined
+            ? {}
+            : { purchaseTime: input.purchaseTime }),
+          ...(input.currency === undefined ? {} : { currency: input.currency }),
+          ...(input.notes === undefined ? {} : { notes: input.notes || null }),
+          ...(input.totalCents === undefined
+            ? {}
+            : { totalCents: input.totalCents }),
+          ...(input.lineItems === undefined
+            ? {}
+            : {
+                lineItems: {
+                  create: input.lineItems.map(itemData),
+                },
+              }),
+        },
+        include: receiptInclude,
+      });
+    });
+    return detail(record);
   }
 
   async delete(id: string): Promise<void> {

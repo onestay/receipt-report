@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import request from "supertest";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { healthResponseSchema } from "@receipt-report/contracts";
 import {
   checkDatabase,
@@ -160,6 +160,12 @@ describe("API", () => {
     await request(app).delete(`/api/v1/receipts/${id}`).expect(204);
     await request(app).delete(`/api/v1/receipts/${id}`).expect(404);
     await request(app).get(`/api/v1/receipts/${id}`).expect(404);
+    await request(app)
+      .patch(`/api/v1/receipts/${id}`)
+      .send({ merchant: "Still missing" })
+      .expect(404, {
+        error: { code: "not_found", message: "Receipt not found" },
+      });
     await request(app).get("/api/v1/receipts/not-an-id").expect(400);
     await request(app).get("/api/v1/receipts?limit=101").expect(400);
     await request(app)
@@ -185,6 +191,25 @@ describe("API", () => {
     ]) {
       await request(app).get(`/api/v1/receipts?cursor=${cursor}`).expect(400);
     }
+  });
+
+  it("sanitizes unexpected persistence failures", async () => {
+    const failure = new Error("secret database path /private/receipts.db");
+    const failingDatabase = {
+      receipt: { findMany: async () => Promise.reject(failure) },
+    } as unknown as Database;
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const response = await request(createApp({ database: failingDatabase }))
+      .get("/api/v1/receipts")
+      .expect(500);
+    expect(response.body).toEqual({
+      error: { code: "internal_error", message: "Unexpected server error" },
+    });
+    expect(JSON.stringify(response.body)).not.toContain("private");
+    expect(consoleError).toHaveBeenCalledWith("Unexpected API error");
+    consoleError.mockRestore();
   });
 
   it("paginates equal-date receipts without duplicates", async () => {

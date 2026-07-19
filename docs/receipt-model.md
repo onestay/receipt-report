@@ -51,6 +51,9 @@ In the manual ledger, quantity is an optional positive integer in thousandths
 (`quantityMilli`), and ordered line items are persisted by their zero-based
 position. Quantity, unit price, line total, and receipt total are independently
 entered; reconciliation belongs to a later review workflow.
+Manual-ledger amounts are non-negative; modeling discounts, returns, and deposit
+refunds as signed lines is intentionally deferred to the later extraction and
+review domain.
 
 ## Processing attempt
 
