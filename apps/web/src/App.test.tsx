@@ -368,6 +368,9 @@ describe("receipt editor", () => {
       expect(screen.getAllByLabelText("Description")[0]).toHaveFocus(),
     );
     fireEvent.click(screen.getByRole("button", { name: "Remove item 2" }));
+    await waitFor(() =>
+      expect(screen.getAllByLabelText("Description")[0]).toHaveFocus(),
+    );
     fireEvent.click(screen.getByRole("button", { name: /Add item/ }));
     const descriptions = screen.getAllByLabelText("Description");
     const description = descriptions.at(-1);
@@ -468,5 +471,66 @@ describe("receipt editor", () => {
     confirm.mockReturnValue(true);
     fireEvent.click(screen.getByRole("link", { name: "← Ledger" }));
     expect(location.pathname).toBe("/receipts");
+  });
+  it("does not guard unload while clean", async () => {
+    history.replaceState({}, "", `/receipts/${receipt.id}`);
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify(receipt), { status: 200 }),
+        ),
+    );
+    render(<App />);
+    await screen.findByRole("heading", { name: "Edit receipt" });
+    const unload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(false);
+  });
+  it("restores the receipt after a cancelled browser back navigation", async () => {
+    history.replaceState({}, "", "/receipts");
+    history.pushState({}, "", `/receipts/${receipt.id}`);
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify(receipt), { status: 200 }),
+        ),
+    );
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<App />);
+    await screen.findByRole("heading", { name: "Edit receipt" });
+    fireEvent.change(screen.getByLabelText("Merchant"), {
+      target: { value: "Dirty Markt" },
+    });
+    history.back();
+    await waitFor(() =>
+      expect(window.confirm).toHaveBeenCalledWith(
+        "Discard your unsaved changes?",
+      ),
+    );
+    await waitFor(() =>
+      expect(location.pathname).toBe(`/receipts/${receipt.id}`),
+    );
+  });
+  it("focuses Add item after removing the final line item", async () => {
+    const oneItem = { ...receipt, lineItems: receipt.lineItems.slice(0, 1) };
+    history.replaceState({}, "", `/receipts/${receipt.id}`);
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify(oneItem), { status: 200 }),
+        ),
+    );
+    render(<App />);
+    await screen.findByRole("heading", { name: "Edit receipt" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove item 1" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Add item/ })).toHaveFocus(),
+    );
   });
 });
