@@ -52,11 +52,45 @@ planning commit.
 - PDFs and other multi-page inputs are normalized into ordered page images for
   review and provider-independent processing. The original PDF is retained.
 
+## Public API surface
+
+Versioned REST resources are flat rather than nested:
+
+| Resource                  | Purpose                                    |
+| ------------------------- | ------------------------------------------ |
+| `/api/v1/receipts`        | Receipt CRUD and list                      |
+| `/api/v1/merchant-brands` | Canonical merchant brand CRUD and list     |
+| `/api/v1/merchant-stores` | Store CRUD and list, filtered by `brandId` |
+
+Both merchant lists accept a trimmed display-name `query`, a `limit`, and a
+`cursor`, and are ordered by normalized name then stable ID so keyset
+pagination is deterministic. Receipt responses embed the linked brand and store
+so a client can render the raw label and its grouping without a request per row.
+
+The public error taxonomy is `validation_error`, `invalid_cursor`, `not_found`,
+`conflict`, and `internal_error`. `conflict` (HTTP 409) covers normalized-name
+collisions and referentially blocked deletion. A request naming an unknown or
+mismatched brand/store is a `validation_error`, because the request itself is
+wrong rather than the server state.
+
+## Breaking-change policy
+
+The project is pre-production and has no external consumers. Breaking schema and
+API changes are made directly, without compatibility aliases or deprecation
+windows, and synthetic development data may be discarded or migrated
+mechanically. Migrations are still committed and must apply cleanly, so a
+developer database can move forward without being recreated by hand. This policy
+ends when the first real deployment carries data worth preserving.
+
 ## Persistence
 
 SQLite is the primary database and should use WAL mode where deployment permits.
 The database and receipt document directory must be mountable and backable up
-together. Jobs begin as ordinary database records; no separate queue service is
+together. Canonical merchant brands and stores live in the same SQLite database
+as receipts, so an existing backup or restore covers merchant identity with no
+additional step; a restore that predates a brand still referenced by a receipt
+would fail its foreign key, so database and documents must be restored as one
+consistent set. Jobs begin as ordinary database records; no separate queue service is
 needed for the initial workload.
 
 ## Trust boundaries

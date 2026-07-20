@@ -68,7 +68,9 @@ describe("application shell", () => {
             receipts: [
               {
                 id: "cm12345678901234567890123",
-                merchant: "Synthetic Markt",
+                merchantRaw: "Synthetic Markt",
+                merchantBrand: null,
+                merchantStore: null,
                 purchaseDate: "2026-07-19",
                 purchaseTime: null,
                 currency: "EUR",
@@ -94,7 +96,9 @@ describe("application shell", () => {
   it("loads another page without duplicate receipts", async () => {
     const first = {
       id: "cm12345678901234567890123",
-      merchant: "First",
+      merchantRaw: "First",
+      merchantBrand: null,
+      merchantStore: null,
       purchaseDate: "2026-07-19",
       purchaseTime: "12:00",
       currency: "EUR",
@@ -107,7 +111,7 @@ describe("application shell", () => {
     const second = {
       ...first,
       id: "cm22345678901234567890123",
-      merchant: "Second",
+      merchantRaw: "Second",
     };
     const fetchMock = vi
       .fn()
@@ -136,7 +140,9 @@ describe("application shell", () => {
       new Response(
         JSON.stringify({
           id: "cm12345678901234567890123",
-          merchant: "Synthetic",
+          merchantRaw: "Synthetic",
+          merchantBrand: null,
+          merchantStore: null,
           purchaseDate: "2026-07-19",
           purchaseTime: null,
           currency: "EUR",
@@ -263,7 +269,9 @@ describe("application shell", () => {
 describe("receipt editor", () => {
   const receipt = {
     id: "cm12345678901234567890123",
-    merchant: "Synthetic Markt",
+    merchantRaw: "Synthetic Markt",
+    merchantBrand: null,
+    merchantStore: null,
     purchaseDate: "2026-07-19",
     purchaseTime: null,
     currency: "EUR",
@@ -297,7 +305,7 @@ describe("receipt editor", () => {
     expect(parseQuantity("1,2345")).toBeNull();
     expect(
       lineTotalSum({
-        merchant: "",
+        merchantRaw: "",
         purchaseDate: "",
         purchaseTime: "",
         total: "",

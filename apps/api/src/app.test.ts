@@ -88,7 +88,7 @@ describe("API", () => {
     const created = await request(app)
       .post("/api/v1/receipts")
       .send({
-        merchant: " Test Markt ",
+        merchantRaw: " Test Markt ",
         purchaseDate: "2026-07-19",
         purchaseTime: "18:42",
         totalCents: 450,
@@ -105,7 +105,7 @@ describe("API", () => {
       })
       .expect(201);
     expect(created.body).toMatchObject({
-      merchant: "Test Markt",
+      merchantRaw: "Test Markt",
       currency: "EUR",
       notes: "synthetic",
     });
@@ -120,7 +120,7 @@ describe("API", () => {
     const updated = await request(app)
       .patch(`/api/v1/receipts/${id}`)
       .send({
-        merchant: "Changed",
+        merchantRaw: "Changed",
         lineItems: [{ description: "B", lineTotalCents: 350 }],
       })
       .expect(200);
@@ -154,7 +154,7 @@ describe("API", () => {
       .expect((response) =>
         expect(response.body).toMatchObject({
           totalCents: 451,
-          merchant: "Changed",
+          merchantRaw: "Changed",
         }),
       );
     await request(app).delete(`/api/v1/receipts/${id}`).expect(204);
@@ -162,7 +162,7 @@ describe("API", () => {
     await request(app).get(`/api/v1/receipts/${id}`).expect(404);
     await request(app)
       .patch(`/api/v1/receipts/${id}`)
-      .send({ merchant: "Still missing" })
+      .send({ merchantRaw: "Still missing" })
       .expect(404, {
         error: { code: "not_found", message: "Receipt not found" },
       });
@@ -228,10 +228,10 @@ describe("API", () => {
     );
     database = await createDatabase(databaseUrl);
     const app = createApp({ database });
-    for (const merchant of ["A", "B", "C"])
+    for (const merchantRaw of ["A", "B", "C"])
       await request(app)
         .post("/api/v1/receipts")
-        .send({ merchant, purchaseDate: "2026-07-19", totalCents: 1 })
+        .send({ merchantRaw, purchaseDate: "2026-07-19", totalCents: 1 })
         .expect(201);
     const first = await request(app)
       .get("/api/v1/receipts?limit=2")

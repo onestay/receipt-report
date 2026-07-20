@@ -51,7 +51,7 @@ test("creates, edits, reorders, saves, reloads, and deletes a receipt", async ({
 test("mobile editor has no horizontal overflow", async ({ page, request }) => {
   const response = await request.post("/api/v1/receipts", {
     data: {
-      merchant: "Synthetic Mobile Markt",
+      merchantRaw: "Synthetic Mobile Markt",
       purchaseDate: "2026-07-19",
       totalCents: 100,
       lineItems: [],

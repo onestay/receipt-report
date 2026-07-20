@@ -2,11 +2,60 @@
 
 This document captures concepts rather than a final database schema.
 
+## Merchant identity
+
+Merchant identity is three distinct concepts, not one string.
+
+- **Canonical merchant brand** — the user-facing group spending is reported
+  under, for example `EDEKA` or `REWE`. Stable identifier, display name, and a
+  unique normalized name.
+- **Store** — an optional specific location belonging to exactly one brand, for
+  example `EDEKA Müller`, with optional structured street, postal code, and
+  city fields.
+- **Raw merchant label** — the exact text a user entered or a model extracted,
+  for example `EDEKA M. Müller e.K.`, retained verbatim on the receipt after
+  surrounding-whitespace normalization only.
+
+A receipt always has a raw label and may additionally be linked to a brand, or
+to a brand and a store. Both canonical links are nullable so unknown merchants
+remain valid. A store link always carries its brand: the pair is validated at
+the API boundary and a compound `(store, brand)` database relationship prevents
+inconsistent direct writes. Clearing the brand clears the store in the same
+update.
+
+### Canonical-name normalization
+
+Uniqueness and lookup use one deterministic function: Unicode NFC, trim,
+collapse internal Unicode whitespace to a single ASCII space, then
+`toLocaleLowerCase("de-DE")` with the locale pinned so the result does not vary
+with runtime ICU defaults. Display spelling is preserved separately.
+
+`ß` is deliberately **not** equated with `ss`, and diacritics are deliberately
+**not** stripped: `Straße` and `Strasse`, and `Müller` and `Muller`, are
+different merchants. Equating them would silently merge genuinely distinct
+businesses, which is harder to undo than creating a duplicate.
+
+### Store uniqueness
+
+Stores carry a non-null normalized address key derived from the trimmed,
+collapsed, and lowercased street, postal code, and city fields joined by a
+separator that cannot occur in address text. Uniqueness is
+`(brandId, normalized display name, normalized address key)`. Same-name stores
+at different known addresses are therefore allowed, while two address-less
+stores with the same name within a brand must be disambiguated by display name.
+
+### Deletion policy
+
+Deletion is restrictive. A brand with stores or linked receipts cannot be
+deleted, and a store linked from a receipt cannot be deleted. No delete
+cascades or silently unlinks canonical identity, because a receipt losing its
+merchant grouping is a silent data loss the user cannot see.
+
 ## Receipt
 
 - Stable identifier
 - Processing and review status
-- Merchant name and optional address
+- Raw merchant label, with optional canonical brand and store links
 - Purchase date and optional time
 - Currency, initially EUR
 - Optional user notes
