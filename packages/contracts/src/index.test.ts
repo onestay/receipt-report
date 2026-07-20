@@ -1,11 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
   healthResponseSchema,
+  merchantStoreCreateSchema,
+  normalizeMerchantAddressKey,
+  normalizeMerchantName,
   receiptCreateSchema,
   receiptDateSchema,
   receiptTimeSchema,
   receiptUpdateSchema,
 } from "./index.js";
+
+/** Field separator used by the canonical address key. */
+const separator = "\u001F";
+const brandId = "clx0000000000000000000000";
+const storeId = "clx1111111111111111111111";
 
 describe("healthResponseSchema", () => {
   it("accepts the public health response", () => {
@@ -35,14 +43,14 @@ describe("healthResponseSchema", () => {
 
 describe("receipt contracts", () => {
   const valid = {
-    merchant: "  Synthetic Markt  ",
+    merchantRaw: "  Synthetic Markt  ",
     purchaseDate: "2026-07-19",
     totalCents: 1234,
     lineItems: [{ description: " Apfel ", lineTotalCents: 199 }],
   };
   it("normalizes valid input and defaults EUR", () => {
     expect(receiptCreateSchema.parse(valid)).toMatchObject({
-      merchant: "Synthetic Markt",
+      merchantRaw: "Synthetic Markt",
       currency: "EUR",
       lineItems: [{ description: "Apfel" }],
     });
@@ -70,7 +78,7 @@ describe("receipt contracts", () => {
     expect(receiptTimeSchema.safeParse(value).success).toBe(false),
   );
   it.each([
-    { ...valid, merchant: " " },
+    { ...valid, merchantRaw: " " },
     { ...valid, currency: "USD" },
     { ...valid, totalCents: -1 },
     { ...valid, totalCents: Number.MAX_SAFE_INTEGER + 1 },
@@ -87,5 +95,143 @@ describe("receipt contracts", () => {
     expect(receiptUpdateSchema.parse({ lineItems: [] })).toEqual({
       lineItems: [],
     });
+  });
+});
+
+describe("merchant name normalization", () => {
+  it("applies NFC, trims, collapses whitespace, and lowercases for de-DE", () => {
+    expect(normalizeMerchantName("  EDEKA  M.\tMüller  ")).toBe(
+      "edeka m. müller",
+    );
+  });
+
+  it("equates precomposed and decomposed umlauts", () => {
+    expect(normalizeMerchantName("Müller")).toBe(
+      normalizeMerchantName("Müller"),
+    );
+  });
+
+  it("keeps ß distinct from ss and preserves diacritics", () => {
+    expect(normalizeMerchantName("Straße")).not.toBe(
+      normalizeMerchantName("Strasse"),
+    );
+    expect(normalizeMerchantName("Müller")).not.toBe(
+      normalizeMerchantName("Muller"),
+    );
+  });
+
+  it("derives a stable address key that separates field boundaries", () => {
+    expect(
+      normalizeMerchantAddressKey({
+        street: " Haupt straße 1 ",
+        postalCode: "10115",
+        city: "Berlin",
+      }),
+    ).toBe(["haupt straße 1", "10115", "berlin"].join(separator));
+  });
+
+  it("returns a non-null key for an address-less store", () => {
+    expect(normalizeMerchantAddressKey({})).toBe(["", "", ""].join(separator));
+  });
+
+  it("does not let field shifts collide", () => {
+    expect(
+      normalizeMerchantAddressKey({ street: "A", postalCode: "B" }),
+    ).not.toBe(normalizeMerchantAddressKey({ street: "A", city: "B" }));
+  });
+});
+
+describe("merchant contracts", () => {
+  it("trims store address fields and treats blanks as absent", () => {
+    expect(
+      merchantStoreCreateSchema.parse({
+        brandId,
+        name: "  EDEKA Müller  ",
+        street: "  Hauptstraße 1 ",
+        postalCode: "   ",
+      }),
+    ).toMatchObject({
+      name: "EDEKA Müller",
+      street: "Hauptstraße 1",
+      postalCode: null,
+    });
+  });
+
+  it("rejects a store without a brand", () => {
+    expect(
+      merchantStoreCreateSchema.safeParse({ name: "EDEKA Müller" }).success,
+    ).toBe(false);
+  });
+});
+
+describe("receipt merchant identity", () => {
+  const base = {
+    merchantRaw: "EDEKA M. Müller e.K.",
+    purchaseDate: "2026-07-19",
+    totalCents: 1234,
+  };
+
+  it("accepts raw-only, brand-only, and brand-plus-store identity", () => {
+    expect(receiptCreateSchema.parse(base)).toMatchObject({
+      merchantRaw: "EDEKA M. Müller e.K.",
+    });
+    expect(
+      receiptCreateSchema.parse({ ...base, merchantBrandId: brandId }),
+    ).toMatchObject({ merchantBrandId: brandId });
+    expect(
+      receiptCreateSchema.parse({
+        ...base,
+        merchantBrandId: brandId,
+        merchantStoreId: storeId,
+      }),
+    ).toMatchObject({ merchantBrandId: brandId, merchantStoreId: storeId });
+  });
+
+  it("rejects a store without its brand on create", () => {
+    expect(
+      receiptCreateSchema.safeParse({ ...base, merchantStoreId: storeId })
+        .success,
+    ).toBe(false);
+    expect(
+      receiptCreateSchema.safeParse({
+        ...base,
+        merchantBrandId: null,
+        merchantStoreId: storeId,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("removes the old free-form merchant field", () => {
+    expect(
+      receiptCreateSchema.safeParse({
+        merchant: "EDEKA",
+        purchaseDate: "2026-07-19",
+        totalCents: 1,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("requires both canonical links to move together on update", () => {
+    expect(
+      receiptUpdateSchema.safeParse({ merchantBrandId: brandId }).success,
+    ).toBe(false);
+    expect(
+      receiptUpdateSchema.safeParse({ merchantStoreId: null }).success,
+    ).toBe(false);
+    expect(
+      receiptUpdateSchema.parse({
+        merchantBrandId: null,
+        merchantStoreId: null,
+      }),
+    ).toEqual({ merchantBrandId: null, merchantStoreId: null });
+  });
+
+  it("rejects clearing a brand while keeping a store", () => {
+    expect(
+      receiptUpdateSchema.safeParse({
+        merchantBrandId: null,
+        merchantStoreId: storeId,
+      }).success,
+    ).toBe(false);
   });
 });

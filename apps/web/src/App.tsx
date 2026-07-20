@@ -213,7 +213,7 @@ function ReceiptList() {
                 key={receipt.id}
               >
                 <span>
-                  <strong>{receipt.merchant}</strong>
+                  <strong>{receipt.merchantRaw}</strong>
                   <small>
                     {formatDate(receipt.purchaseDate)}
                     {receipt.purchaseTime
@@ -281,11 +281,11 @@ function CreateReceipt() {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
-    const merchant = String(data.get("merchant") ?? "").trim();
+    const merchantRaw = String(data.get("merchantRaw") ?? "").trim();
     const purchaseDate = String(data.get("purchaseDate") ?? "");
     const total = parseMoney(String(data.get("total") ?? ""));
     const next: Record<string, string> = {};
-    if (!merchant) next.merchant = "Enter a merchant.";
+    if (!merchantRaw) next.merchantRaw = "Enter a merchant.";
     if (!purchaseDate) next.purchaseDate = "Choose a purchase date.";
     if (total === null)
       next.total = "Enter euros with up to two decimal places.";
@@ -298,7 +298,7 @@ function CreateReceipt() {
     setServerError("");
     try {
       const body = {
-        merchant,
+        merchantRaw,
         purchaseDate,
         purchaseTime: String(data.get("purchaseTime") || "") || null,
         totalCents: total,
@@ -364,17 +364,19 @@ function CreateReceipt() {
         noValidate
       >
         <div className="field field--wide">
-          <label htmlFor="merchant">Merchant</label>
+          <label htmlFor="merchantRaw">Merchant</label>
           <input
-            id="merchant"
-            name="merchant"
+            id="merchantRaw"
+            name="merchantRaw"
             autoFocus
-            aria-invalid={!!errors.merchant}
-            aria-describedby={errors.merchant ? "merchant-error" : undefined}
+            aria-invalid={!!errors.merchantRaw}
+            aria-describedby={
+              errors.merchantRaw ? "merchantRaw-error" : undefined
+            }
           />
-          {errors.merchant && (
-            <small id="merchant-error" className="field-error">
-              {errors.merchant}
+          {errors.merchantRaw && (
+            <small id="merchantRaw-error" className="field-error">
+              {errors.merchantRaw}
             </small>
           )}
         </div>
@@ -451,7 +453,7 @@ type EditorItem = {
   lineTotal: string;
 };
 type EditorValues = {
-  merchant: string;
+  merchantRaw: string;
   purchaseDate: string;
   purchaseTime: string;
   total: string;
@@ -461,7 +463,7 @@ type EditorValues = {
 
 function editorValues(receipt: ReceiptDetail): EditorValues {
   return {
-    merchant: receipt.merchant,
+    merchantRaw: receipt.merchantRaw,
     purchaseDate: receipt.purchaseDate,
     purchaseTime: receipt.purchaseTime ?? "",
     total: centsInput(receipt.totalCents),
@@ -492,7 +494,7 @@ function ReceiptEditor({ id }: { id: string }) {
     "loading" | "ready" | "not-found" | "error"
   >("loading");
   const empty: EditorValues = {
-    merchant: "",
+    merchantRaw: "",
     purchaseDate: "",
     purchaseTime: "",
     total: "",
@@ -617,7 +619,8 @@ function ReceiptEditor({ id }: { id: string }) {
   async function save() {
     const nextErrors: Record<string, string> = {};
     const total = parseMoney(values.total);
-    if (!values.merchant.trim()) nextErrors.merchant = "Enter a merchant.";
+    if (!values.merchantRaw.trim())
+      nextErrors.merchantRaw = "Enter a merchant.";
     if (!total && total !== 0)
       nextErrors.total = "Enter a valid non-negative EUR amount.";
     const lineItems = values.items.map((item, index) => {
@@ -652,7 +655,7 @@ function ReceiptEditor({ id }: { id: string }) {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          merchant: values.merchant,
+          merchantRaw: values.merchantRaw,
           purchaseDate: values.purchaseDate,
           purchaseTime: values.purchaseTime || null,
           totalCents: total,
@@ -730,10 +733,10 @@ function ReceiptEditor({ id }: { id: string }) {
             </h2>
             <EditorField
               label="Merchant"
-              id="editor-merchant"
-              value={values.merchant}
-              error={errors.merchant}
-              onChange={(value) => update("merchant", value)}
+              id="editor-merchantRaw"
+              value={values.merchantRaw}
+              error={errors.merchantRaw}
+              onChange={(value) => update("merchantRaw", value)}
             />
             <EditorField
               label="Purchase date"

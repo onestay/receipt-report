@@ -7,19 +7,61 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/// Canonical merchant brand or group, for example `EDEKA`.
+model MerchantBrand {
+  id             String          @id @default(cuid())
+  name           String
+  normalizedName String          @unique
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  stores         MerchantStore[]
+  receipts       Receipt[]
+
+  @@index([normalizedName, id])
+}
+
+/// A specific store belonging to exactly one brand, for example `EDEKA Müller`.
+model MerchantStore {
+  id                   String        @id @default(cuid())
+  brandId              String
+  brand                MerchantBrand @relation(fields: [brandId], references: [id], onDelete: Restrict)
+  name                 String
+  normalizedName       String
+  street               String?
+  postalCode           String?
+  city                 String?
+  normalizedAddressKey String
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+  receipts             Receipt[]
+
+  /// Same-name stores are allowed at different known addresses; two
+  /// address-less same-name stores must be disambiguated by display name.
+  @@unique([brandId, normalizedName, normalizedAddressKey])
+  /// Target of the compound receipt relation that keeps store and brand consistent.
+  @@unique([id, brandId])
+  @@index([brandId, normalizedName, id])
+}
+
 model Receipt {
-  id           String     @id @default(cuid())
-  merchant     String
-  purchaseDate String
-  purchaseTime String?
-  currency     String     @default("EUR")
-  notes        String?
-  totalCents   Int
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-  lineItems    LineItem[]
+  id              String         @id @default(cuid())
+  merchantRaw     String
+  merchantBrandId String?
+  merchantStoreId String?
+  merchantBrand   MerchantBrand? @relation(fields: [merchantBrandId], references: [id], onDelete: Restrict)
+  merchantStore   MerchantStore? @relation(fields: [merchantStoreId, merchantBrandId], references: [id, brandId], onDelete: Restrict)
+  purchaseDate    String
+  purchaseTime    String?
+  currency        String         @default("EUR")
+  notes           String?
+  totalCents      Int
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  lineItems       LineItem[]
 
   @@index([purchaseDate, id])
+  @@index([merchantBrandId])
+  @@index([merchantStoreId])
 }
 
 model LineItem {

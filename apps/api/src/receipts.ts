@@ -8,11 +8,13 @@ import {
   type ReceiptList,
   type ReceiptUpdate,
 } from "@receipt-report/contracts";
+import {
+  InvalidCursorError,
+  InvalidReferenceError,
+  NotFoundError,
+} from "./errors.js";
 
 type Cursor = { purchaseDate: string; id: string };
-
-export class InvalidCursorError extends Error {}
-export class ReceiptNotFoundError extends Error {}
 
 function encodeCursor(cursor: Cursor): string {
   return Buffer.from(JSON.stringify(cursor)).toString("base64url");
@@ -41,7 +43,22 @@ function decodeCursor(value: string): Cursor {
   }
 }
 
+const merchantInclude = {
+  merchantBrand: { select: { id: true, name: true } },
+  merchantStore: {
+    select: {
+      id: true,
+      brandId: true,
+      name: true,
+      street: true,
+      postalCode: true,
+      city: true,
+    },
+  },
+} as const;
+
 const receiptInclude = {
+  ...merchantInclude,
   lineItems: { orderBy: { position: "asc" as const } },
 } as const;
 
@@ -65,6 +82,53 @@ function detail(record: ReceiptWithItems): ReceiptDetail {
   });
 }
 
+type MerchantLinks = {
+  merchantBrandId?: string | null | undefined;
+  merchantStoreId?: string | null | undefined;
+};
+
+/**
+ * Validates the canonical brand/store pair against persisted rows. The schemas
+ * already guarantee a store is accompanied by a brand; this rejects unknown IDs
+ * and a store that belongs to a different brand before anything is written.
+ */
+async function resolveMerchantLinks(
+  database: Prisma.TransactionClient | PrismaClient,
+  links: MerchantLinks,
+): Promise<{ merchantBrandId: string | null; merchantStoreId: string | null }> {
+  const merchantBrandId = links.merchantBrandId ?? null;
+  const merchantStoreId = links.merchantStoreId ?? null;
+  if (merchantStoreId !== null && merchantBrandId === null) {
+    throw new InvalidReferenceError(
+      "merchantBrandId is required when merchantStoreId is set",
+    );
+  }
+  if (merchantBrandId !== null) {
+    const existing = await database.merchantBrand.findUnique({
+      where: { id: merchantBrandId },
+      select: { id: true },
+    });
+    if (!existing) {
+      throw new InvalidReferenceError("Unknown merchantBrandId");
+    }
+  }
+  if (merchantStoreId !== null) {
+    const existing = await database.merchantStore.findUnique({
+      where: { id: merchantStoreId },
+      select: { brandId: true },
+    });
+    if (!existing) {
+      throw new InvalidReferenceError("Unknown merchantStoreId");
+    }
+    if (existing.brandId !== merchantBrandId) {
+      throw new InvalidReferenceError(
+        "merchantStoreId does not belong to merchantBrandId",
+      );
+    }
+  }
+  return { merchantBrandId, merchantStoreId };
+}
+
 function itemData(item: ReceiptCreate["lineItems"][number], position: number) {
   return {
     description: item.description,
@@ -79,9 +143,11 @@ export class ReceiptRepository {
   public constructor(private readonly database: PrismaClient) {}
 
   async create(input: ReceiptCreate): Promise<ReceiptDetail> {
+    const links = await resolveMerchantLinks(this.database, input);
     const record = await this.database.receipt.create({
       data: {
-        merchant: input.merchant,
+        merchantRaw: input.merchantRaw,
+        ...links,
         purchaseDate: input.purchaseDate,
         purchaseTime: input.purchaseTime ?? null,
         currency: input.currency,
@@ -101,7 +167,7 @@ export class ReceiptRepository {
       where: { id },
       include: receiptInclude,
     });
-    if (!record) throw new ReceiptNotFoundError("Receipt not found");
+    if (!record) throw new NotFoundError("Receipt not found");
     return detail(record);
   }
 
@@ -120,7 +186,7 @@ export class ReceiptRepository {
         : {}),
       orderBy: [{ purchaseDate: "desc" }, { id: "desc" }],
       take: limit + 1,
-      include: { _count: { select: { lineItems: true } } },
+      include: { ...merchantInclude, _count: { select: { lineItems: true } } },
     });
     const hasMore = records.length > limit;
     const page = records.slice(0, limit);
@@ -146,14 +212,23 @@ export class ReceiptRepository {
       const existing = await transaction.receipt.findUnique({
         where: { id },
       });
-      if (!existing) throw new ReceiptNotFoundError("Receipt not found");
+      if (!existing) throw new NotFoundError("Receipt not found");
+      // Both link fields travel together or not at all, so canonical identity
+      // is either fully restated or left untouched.
+      const links =
+        "merchantBrandId" in input
+          ? await resolveMerchantLinks(transaction, input)
+          : {};
       if (input.lineItems) {
         await transaction.lineItem.deleteMany({ where: { receiptId: id } });
       }
       return transaction.receipt.update({
         where: { id },
         data: {
-          ...(input.merchant === undefined ? {} : { merchant: input.merchant }),
+          ...(input.merchantRaw === undefined
+            ? {}
+            : { merchantRaw: input.merchantRaw }),
+          ...links,
           ...(input.purchaseDate === undefined
             ? {}
             : { purchaseDate: input.purchaseDate }),
@@ -181,6 +256,6 @@ export class ReceiptRepository {
 
   async delete(id: string): Promise<void> {
     const result = await this.database.receipt.deleteMany({ where: { id } });
-    if (result.count === 0) throw new ReceiptNotFoundError("Receipt not found");
+    if (result.count === 0) throw new NotFoundError("Receipt not found");
   }
 }

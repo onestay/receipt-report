@@ -1,22 +1,33 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import express, { type ErrorRequestHandler, type Express } from "express";
-import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import {
   apiErrorSchema,
   healthResponseSchema,
+  idSchema,
+  merchantBrandCreateSchema,
+  merchantBrandUpdateSchema,
+  merchantListQuerySchema,
+  merchantStoreCreateSchema,
+  merchantStoreListQuerySchema,
+  merchantStoreUpdateSchema,
   receiptCreateSchema,
   receiptIdSchema,
   receiptListQuerySchema,
   receiptUpdateSchema,
+  type ApiError,
 } from "@receipt-report/contracts";
 import type { Database } from "@receipt-report/database";
 import { ZodError } from "zod";
 import {
+  ConflictError,
   InvalidCursorError,
-  ReceiptNotFoundError,
-  ReceiptRepository,
-} from "./receipts.js";
+  InvalidReferenceError,
+  NotFoundError,
+  prismaErrorCode,
+} from "./errors.js";
+import { MerchantRepository } from "./merchants.js";
+import { ReceiptRepository } from "./receipts.js";
 
 export type AppOptions = {
   webDistDirectory?: string;
@@ -39,6 +50,127 @@ export function createApp(options: AppOptions = {}): Express {
   });
 
   if (options.database) {
+    const merchants = new MerchantRepository(options.database);
+    app.get("/api/v1/merchant-brands", async (request, response, next) => {
+      try {
+        response.json(
+          await merchants.listBrands(
+            merchantListQuerySchema.parse(request.query),
+          ),
+        );
+      } catch (error) {
+        next(error);
+      }
+    });
+    app.post("/api/v1/merchant-brands", async (request, response, next) => {
+      try {
+        response
+          .status(201)
+          .json(
+            await merchants.createBrand(
+              merchantBrandCreateSchema.parse(request.body),
+            ),
+          );
+      } catch (error) {
+        next(error);
+      }
+    });
+    app.get("/api/v1/merchant-brands/:id", async (request, response, next) => {
+      try {
+        response.json(
+          await merchants.getBrand(idSchema.parse(request.params.id)),
+        );
+      } catch (error) {
+        next(error);
+      }
+    });
+    app.patch(
+      "/api/v1/merchant-brands/:id",
+      async (request, response, next) => {
+        try {
+          response.json(
+            await merchants.updateBrand(
+              idSchema.parse(request.params.id),
+              merchantBrandUpdateSchema.parse(request.body),
+            ),
+          );
+        } catch (error) {
+          next(error);
+        }
+      },
+    );
+    app.delete(
+      "/api/v1/merchant-brands/:id",
+      async (request, response, next) => {
+        try {
+          await merchants.deleteBrand(idSchema.parse(request.params.id));
+          response.status(204).end();
+        } catch (error) {
+          next(error);
+        }
+      },
+    );
+
+    app.get("/api/v1/merchant-stores", async (request, response, next) => {
+      try {
+        response.json(
+          await merchants.listStores(
+            merchantStoreListQuerySchema.parse(request.query),
+          ),
+        );
+      } catch (error) {
+        next(error);
+      }
+    });
+    app.post("/api/v1/merchant-stores", async (request, response, next) => {
+      try {
+        response
+          .status(201)
+          .json(
+            await merchants.createStore(
+              merchantStoreCreateSchema.parse(request.body),
+            ),
+          );
+      } catch (error) {
+        next(error);
+      }
+    });
+    app.get("/api/v1/merchant-stores/:id", async (request, response, next) => {
+      try {
+        response.json(
+          await merchants.getStore(idSchema.parse(request.params.id)),
+        );
+      } catch (error) {
+        next(error);
+      }
+    });
+    app.patch(
+      "/api/v1/merchant-stores/:id",
+      async (request, response, next) => {
+        try {
+          response.json(
+            await merchants.updateStore(
+              idSchema.parse(request.params.id),
+              merchantStoreUpdateSchema.parse(request.body),
+            ),
+          );
+        } catch (error) {
+          next(error);
+        }
+      },
+    );
+    app.delete(
+      "/api/v1/merchant-stores/:id",
+      async (request, response, next) => {
+        try {
+          await merchants.deleteStore(idSchema.parse(request.params.id));
+          response.status(204).end();
+        } catch (error) {
+          next(error);
+        }
+      },
+    );
+
     const receipts = new ReceiptRepository(options.database);
     app.get("/api/v1/receipts", async (request, response, next) => {
       try {
@@ -118,18 +250,27 @@ export function createApp(options: AppOptions = {}): Express {
         .json(apiError("validation_error", "Request validation failed"));
       return;
     }
+    if (error instanceof InvalidReferenceError) {
+      response.status(400).json(apiError("validation_error", error.message));
+      return;
+    }
     if (error instanceof InvalidCursorError) {
       response
         .status(400)
         .json(apiError("invalid_cursor", "Invalid pagination cursor"));
       return;
     }
-    if (error instanceof ReceiptNotFoundError) {
-      response.status(404).json(apiError("not_found", "Receipt not found"));
+    if (error instanceof NotFoundError) {
+      response.status(404).json(apiError("not_found", error.message));
       return;
     }
-    if (error instanceof PrismaClientKnownRequestError) {
-      console.error("Receipt database operation failed", error.code);
+    if (error instanceof ConflictError) {
+      response.status(409).json(apiError("conflict", error.message));
+      return;
+    }
+    const databaseErrorCode = prismaErrorCode(error);
+    if (databaseErrorCode) {
+      console.error("Receipt database operation failed", databaseErrorCode);
     } else {
       console.error("Unexpected API error");
     }
@@ -141,9 +282,6 @@ export function createApp(options: AppOptions = {}): Express {
   return app;
 }
 
-function apiError(
-  code: "validation_error" | "invalid_cursor" | "not_found" | "internal_error",
-  message: string,
-) {
+function apiError(code: ApiError["error"]["code"], message: string) {
   return apiErrorSchema.parse({ error: { code, message } });
 }
