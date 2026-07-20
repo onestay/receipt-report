@@ -104,13 +104,23 @@ export const merchantStoreCreateSchema = z
   })
   .strict();
 
-/** A store belongs to exactly one brand, so `brandId` is not updatable. */
+/**
+ * A store belongs to exactly one brand, so `brandId` is not updatable.
+ *
+ * Ordinary PATCH semantics: an omitted field is left unchanged, while an
+ * explicit `null` (or a blank string) clears an address field. Sending only a
+ * new name must not erase a saved address.
+ */
 export const merchantStoreUpdateSchema = z
   .object({
-    name: trimmedNonEmptyText,
+    name: trimmedNonEmptyText.optional(),
     ...merchantAddressInputSchema,
   })
-  .strict();
+  .strict()
+  .refine(
+    (value) => Object.keys(value).length > 0,
+    "At least one field is required",
+  );
 
 export const merchantBrandSchema = z.object({
   id: idSchema,

@@ -116,17 +116,38 @@ function store(record: {
   });
 }
 
-function storeAddressData(input: {
+type StoreAddress = {
   street?: string | null | undefined;
   postalCode?: string | null | undefined;
   city?: string | null | undefined;
-}) {
+};
+
+const addressFields = ["street", "postalCode", "city"] as const;
+
+/** Persisted columns for a fully resolved address. */
+function storeAddressData(address: StoreAddress) {
   return {
-    street: input.street ?? null,
-    postalCode: input.postalCode ?? null,
-    city: input.city ?? null,
-    normalizedAddressKey: normalizeMerchantAddressKey(input),
+    street: address.street ?? null,
+    postalCode: address.postalCode ?? null,
+    city: address.city ?? null,
+    normalizedAddressKey: normalizeMerchantAddressKey(address),
   };
+}
+
+/**
+ * Merges a partial address patch onto the stored one. Only fields the client
+ * actually sent are touched, so renaming a store cannot silently drop its
+ * address; sending an explicit `null` still clears a field.
+ */
+function mergeStoreAddress(
+  existing: StoreAddress,
+  patch: StoreAddress,
+): StoreAddress {
+  const merged: StoreAddress = {};
+  for (const field of addressFields) {
+    merged[field] = field in patch ? (patch[field] ?? null) : existing[field];
+  }
+  return merged;
 }
 
 export class MerchantRepository {
@@ -293,15 +314,16 @@ export class MerchantRepository {
     id: string,
     input: MerchantStoreUpdate,
   ): Promise<MerchantStore> {
-    await this.getStore(id);
+    const existing = await this.getStore(id);
+    const name = input.name ?? existing.name;
     try {
       return store(
         await this.database.merchantStore.update({
           where: { id },
           data: {
-            name: input.name,
-            normalizedName: normalizeMerchantName(input.name),
-            ...storeAddressData(input),
+            name,
+            normalizedName: normalizeMerchantName(name),
+            ...storeAddressData(mergeStoreAddress(existing, input)),
           },
         }),
       );

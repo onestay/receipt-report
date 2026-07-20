@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   healthResponseSchema,
   merchantStoreCreateSchema,
+  merchantStoreUpdateSchema,
   normalizeMerchantAddressKey,
   normalizeMerchantName,
   receiptCreateSchema,
@@ -155,6 +156,23 @@ describe("merchant contracts", () => {
       street: "Hauptstraße 1",
       postalCode: null,
     });
+  });
+
+  it("distinguishes an omitted address field from an explicit clear", () => {
+    const patch = merchantStoreUpdateSchema.parse({
+      name: "EDEKA Nord",
+      city: null,
+    });
+    expect("city" in patch).toBe(true);
+    expect(patch.city).toBeNull();
+    expect("street" in patch).toBe(false);
+  });
+
+  it("requires a meaningful store patch", () => {
+    expect(merchantStoreUpdateSchema.safeParse({}).success).toBe(false);
+    expect(
+      merchantStoreUpdateSchema.safeParse({ city: "Berlin" }).success,
+    ).toBe(true);
   });
 
   it("rejects a store without a brand", () => {

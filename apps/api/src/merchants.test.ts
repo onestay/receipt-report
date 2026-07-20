@@ -232,13 +232,23 @@ describe("merchant stores", () => {
 
   it("updates a store and reports collisions", async () => {
     const brandId = await createBrand("EDEKA");
-    const first = await createStore({ brandId, name: "EDEKA Nord" });
+    const first = await createStore({
+      brandId,
+      name: "EDEKA Nord",
+      city: "Hamburg",
+    });
     const second = await createStore({ brandId, name: "EDEKA Süd" });
     await request(app)
       .patch(`/api/v1/merchant-stores/${second.body.id}`)
-      .send({ name: "EDEKA Süd", city: "Hamburg" })
+      .send({ city: "Hamburg" })
       .expect(200)
-      .expect((response) => expect(response.body.city).toBe("Hamburg"));
+      .expect((response) =>
+        expect(response.body).toMatchObject({
+          name: "EDEKA Süd",
+          city: "Hamburg",
+        }),
+      );
+    // Same brand, same name, same address as the first store.
     await request(app)
       .patch(`/api/v1/merchant-stores/${second.body.id}`)
       .send({ name: "EDEKA Nord" })
@@ -246,6 +256,83 @@ describe("merchant stores", () => {
     await request(app)
       .get(`/api/v1/merchant-stores/${first.body.id}`)
       .expect(200);
+  });
+
+  it("keeps a saved address when only the name is patched", async () => {
+    const brandId = await createBrand("EDEKA");
+    const created = await createStore({
+      brandId,
+      name: "EDEKA Nord",
+      street: "Hauptstraße 1",
+      postalCode: "10115",
+      city: "Berlin",
+    });
+    const renamed = await request(app)
+      .patch(`/api/v1/merchant-stores/${created.body.id}`)
+      .send({ name: "EDEKA Nord renamed" })
+      .expect(200);
+    expect(renamed.body).toMatchObject({
+      name: "EDEKA Nord renamed",
+      street: "Hauptstraße 1",
+      postalCode: "10115",
+      city: "Berlin",
+    });
+    expect(renamed.body.normalizedAddressKey).toBe(
+      created.body.normalizedAddressKey,
+    );
+    // The stored row, not just the response, kept the address.
+    await request(app)
+      .get(`/api/v1/merchant-stores/${created.body.id}`)
+      .expect(200)
+      .expect((response) =>
+        expect(response.body).toMatchObject({
+          street: "Hauptstraße 1",
+          city: "Berlin",
+        }),
+      );
+  });
+
+  it("patches address fields independently and clears them explicitly", async () => {
+    const brandId = await createBrand("EDEKA");
+    const created = await createStore({
+      brandId,
+      name: "EDEKA Nord",
+      street: "Hauptstraße 1",
+      postalCode: "10115",
+      city: "Berlin",
+    });
+    await request(app)
+      .patch(`/api/v1/merchant-stores/${created.body.id}`)
+      .send({ city: "Hamburg" })
+      .expect(200)
+      .expect((response) =>
+        expect(response.body).toMatchObject({
+          street: "Hauptstraße 1",
+          postalCode: "10115",
+          city: "Hamburg",
+        }),
+      );
+    await request(app)
+      .patch(`/api/v1/merchant-stores/${created.body.id}`)
+      .send({ street: null, postalCode: "", city: null })
+      .expect(200)
+      .expect((response) =>
+        expect(response.body).toMatchObject({
+          name: "EDEKA Nord",
+          street: null,
+          postalCode: null,
+          city: null,
+        }),
+      );
+  });
+
+  it("rejects an empty store patch", async () => {
+    const brandId = await createBrand("EDEKA");
+    const created = await createStore({ brandId, name: "EDEKA Nord" });
+    await request(app)
+      .patch(`/api/v1/merchant-stores/${created.body.id}`)
+      .send({})
+      .expect(400);
   });
 
   it("filters, searches, and paginates stores", async () => {
