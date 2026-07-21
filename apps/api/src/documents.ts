@@ -1,5 +1,6 @@
 import type { ReadStream } from "node:fs";
 import {
+  NORMALIZATION_PROFILE_VERSION,
   receiptDocumentResponseSchema,
   type ReceiptDocumentResponse,
 } from "@receipt-report/contracts";
@@ -8,6 +9,7 @@ import {
   type FilesystemDocumentStorage,
   persistOriginalDocument,
   replacementOriginalDocumentPath,
+  retryDocumentFileCleanup,
 } from "@receipt-report/database";
 import {
   DocumentValidationTimeoutError,
@@ -36,6 +38,30 @@ type StoredDocument = {
   sha256: string;
   createdAt: Date;
   updatedAt: Date;
+  normalizationStatus: string;
+  normalizationError: string | null;
+  normalizationProfileVersion: string | null;
+  normalizationRenderer: string | null;
+  normalizationRequestedAt: Date;
+  normalizationStartedAt: Date | null;
+  normalizationCompletedAt: Date | null;
+  pages: StoredPage[];
+};
+
+type StoredPage = {
+  id: string;
+  documentId: string;
+  pageNumber: number;
+  totalPages: number;
+  relativePath: string;
+  mediaType: string;
+  byteSize: number;
+  width: number;
+  height: number;
+  sha256: string;
+  profileVersion: string;
+  renderer: string;
+  createdAt: Date;
 };
 
 function documentExtension(mediaType: string): string {
@@ -56,30 +82,25 @@ function publicDocument(document: StoredDocument): ReceiptDocumentResponse {
     sha256: document.sha256,
     createdAt: document.createdAt.toISOString(),
     updatedAt: document.updatedAt.toISOString(),
+    normalizationStatus: document.normalizationStatus,
+    normalizationError: document.normalizationError,
+    normalizationProfileVersion: document.normalizationProfileVersion,
+    normalizationRenderer: document.normalizationRenderer,
+    normalizationRequestedAt: document.normalizationRequestedAt.toISOString(),
+    normalizationStartedAt:
+      document.normalizationStartedAt?.toISOString() ?? null,
+    normalizationCompletedAt:
+      document.normalizationCompletedAt?.toISOString() ?? null,
     originalUrl: `/api/v1/receipts/${document.receiptId}/documents/${document.id}/original`,
+    pages: document.pages.map((page) => ({
+      ...page,
+      createdAt: page.createdAt.toISOString(),
+      imageUrl: `/api/v1/receipts/${document.receiptId}/documents/${document.id}/pages/${page.id}`,
+    })),
   });
 }
 
-export async function retryDocumentFileCleanup(
-  database: Database,
-  storage: FilesystemDocumentStorage,
-): Promise<void> {
-  const pending = await database.documentFileCleanup.findMany({
-    orderBy: { createdAt: "asc" },
-    take: 100,
-  });
-  for (const cleanup of pending) {
-    try {
-      await storage.cleanup(cleanup.relativePath);
-      await database.documentFileCleanup.delete({ where: { id: cleanup.id } });
-    } catch {
-      await database.documentFileCleanup.update({
-        where: { id: cleanup.id },
-        data: { attempts: { increment: 1 }, lastError: "cleanup_failed" },
-      });
-    }
-  }
-}
+export { retryDocumentFileCleanup };
 
 export class DocumentRepository {
   constructor(
@@ -89,7 +110,10 @@ export class DocumentRepository {
   ) {}
 
   private async stored(receiptId: string): Promise<StoredDocument | null> {
-    return this.database.receiptDocument.findUnique({ where: { receiptId } });
+    return this.database.receiptDocument.findUnique({
+      where: { receiptId },
+      include: { pages: { orderBy: { pageNumber: "asc" } } },
+    });
   }
 
   private async requireReceipt(receiptId: string): Promise<void> {
@@ -100,9 +124,10 @@ export class DocumentRepository {
   private async duplicate(
     sha256: string,
     byteSize: number,
-  ): Promise<StoredDocument | null> {
+  ): Promise<{ id: string; receiptId: string } | null> {
     return this.database.receiptDocument.findUnique({
       where: { sha256_byteSize: { sha256, byteSize } },
+      select: { id: true, receiptId: true },
     });
   }
 
@@ -201,11 +226,19 @@ export class DocumentRepository {
         {
           onCleanupFailure: (relativePath) =>
             this.recordFailedCleanup(relativePath),
+          insideTransaction: async (transaction, documentId) => {
+            await transaction.normalizationJob.create({
+              data: {
+                documentId,
+                profileVersion: NORMALIZATION_PROFILE_VERSION,
+              },
+            });
+          },
         },
       );
-      const document = await this.database.receiptDocument.findUniqueOrThrow({
-        where: { id: created.id },
-      });
+      const document = await this.stored(receiptId);
+      if (!document || document.id !== created.id)
+        throw new Error("Created receipt document is missing");
       return publicDocument(document);
     } catch (error) {
       if (prismaErrorCode(error) === "P2002") {
@@ -248,23 +281,59 @@ export class DocumentRepository {
             mediaType,
             byteSize: staged.byteSize,
             sha256: staged.sha256,
+            normalizationStatus: "pending",
+            normalizationError: null,
+            normalizationProfileVersion: null,
+            normalizationRenderer: null,
+            normalizationRequestedAt: new Date(),
+            normalizationStartedAt: null,
+            normalizationCompletedAt: null,
           },
         });
         if (result.count !== 1)
           throw new ConflictError(
             "Receipt document changed during replacement",
           );
-        await transaction.documentFileCleanup.create({
-          data: { relativePath: current.relativePath },
+        for (const relativePath of [
+          current.relativePath,
+          ...current.pages.map((page) => page.relativePath),
+        ])
+          await transaction.documentFileCleanup.upsert({
+            where: { relativePath },
+            create: { relativePath },
+            update: {},
+          });
+        await transaction.receiptPage.deleteMany({
+          where: { documentId: current.id },
+        });
+        await transaction.normalizationJob.upsert({
+          where: { documentId: current.id },
+          create: {
+            documentId: current.id,
+            profileVersion: NORMALIZATION_PROFILE_VERSION,
+          },
+          update: {
+            status: "pending",
+            profileVersion: NORMALIZATION_PROFILE_VERSION,
+            availableAt: new Date(),
+            claimedAt: null,
+            lastError: null,
+          },
         });
         await transaction.documentFileCleanup.delete({
           where: { relativePath: target },
         });
         return transaction.receiptDocument.findUniqueOrThrow({
           where: { id: current.id },
+          include: { pages: { orderBy: { pageNumber: "asc" } } },
         });
       });
-      await this.cleanupRecordedPath(current.relativePath);
+      await Promise.all(
+        [
+          current.relativePath,
+          ...current.pages.map((page) => page.relativePath),
+        ].map((path) => this.cleanupRecordedPath(path)),
+      );
       return publicDocument(updated);
     } catch (error) {
       try {
@@ -305,9 +374,68 @@ export class DocumentRepository {
       await transaction.receiptPage.deleteMany({
         where: { documentId: document.id },
       });
+      await transaction.normalizationJob.deleteMany({
+        where: { documentId: document.id },
+      });
       await transaction.receiptDocument.delete({ where: { id: document.id } });
     });
     await Promise.all(paths.map((path) => this.cleanupRecordedPath(path)));
+  }
+
+  async retry(receiptId: string): Promise<ReceiptDocumentResponse> {
+    await this.requireReceipt(receiptId);
+    const document = await this.stored(receiptId);
+    if (!document) throw new NotFoundError("Receipt document not found");
+    await this.database.$transaction(async (transaction) => {
+      const resetJob = await transaction.normalizationJob.updateMany({
+        where: {
+          documentId: document.id,
+          status: { in: ["failed", "complete"] },
+        },
+        data: {
+          status: "pending",
+          profileVersion: NORMALIZATION_PROFILE_VERSION,
+          availableAt: new Date(),
+          claimedAt: null,
+          claimToken: null,
+          lastError: null,
+        },
+      });
+      const resetDocument = await transaction.receiptDocument.updateMany({
+        where: {
+          id: document.id,
+          normalizationStatus: { in: ["failed", "complete"] },
+        },
+        data: {
+          normalizationStatus: "pending",
+          normalizationError: null,
+          normalizationRequestedAt: new Date(),
+          normalizationStartedAt: null,
+          normalizationCompletedAt: null,
+        },
+      });
+      if (resetJob.count !== 1 || resetDocument.count !== 1)
+        throw new ConflictError("Document normalization is already queued");
+    });
+    return this.get(receiptId);
+  }
+
+  async page(
+    receiptId: string,
+    documentId: string,
+    pageId: string,
+  ): Promise<{ stream: ReadStream; byteSize: number; mediaType: string }> {
+    const page = await this.database.receiptPage.findFirst({
+      where: { id: pageId, documentId, document: { receiptId } },
+    });
+    if (!page) throw new NotFoundError("Receipt page not found");
+    if (!(await this.storage.exists(page.relativePath)))
+      throw new Error("Stored receipt page is missing");
+    return {
+      stream: this.storage.createReadStream(page.relativePath),
+      byteSize: page.byteSize,
+      mediaType: page.mediaType,
+    };
   }
 
   async original(

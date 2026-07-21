@@ -301,6 +301,20 @@ export function createApp(options: AppOptions = {}): Express {
           }
         },
       );
+      app.post(
+        "/api/v1/receipts/:id/document/normalization",
+        async (request, response, next) => {
+          try {
+            response
+              .status(202)
+              .json(
+                await documents.retry(receiptIdSchema.parse(request.params.id)),
+              );
+          } catch (error) {
+            next(error);
+          }
+        },
+      );
       app.get(
         "/api/v1/receipts/:receiptId/documents/:documentId/original",
         async (request, response, next) => {
@@ -322,6 +336,29 @@ export function createApp(options: AppOptions = {}): Express {
             });
             original.stream.once("error", next);
             original.stream.pipe(response);
+          } catch (error) {
+            next(error);
+          }
+        },
+      );
+      app.get(
+        "/api/v1/receipts/:receiptId/documents/:documentId/pages/:pageId",
+        async (request, response, next) => {
+          try {
+            const page = await documents.page(
+              receiptIdSchema.parse(request.params.receiptId),
+              idSchema.parse(request.params.documentId),
+              idSchema.parse(request.params.pageId),
+            );
+            response.set({
+              "Content-Type": page.mediaType,
+              "Content-Length": String(page.byteSize),
+              "Content-Disposition": "inline",
+              "X-Content-Type-Options": "nosniff",
+              "Cache-Control": "private, no-store",
+            });
+            page.stream.once("error", next);
+            page.stream.pipe(response);
           } catch (error) {
             next(error);
           }

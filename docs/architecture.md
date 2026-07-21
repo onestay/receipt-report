@@ -63,6 +63,12 @@ Versioned REST resources are flat rather than nested:
 | `/api/v1/merchant-stores`       | Store CRUD and list, filtered by `brandId`          |
 | `/api/v1/receipts/:id/document` | Original upload, metadata, replacement, and removal |
 
+Document responses also expose normalization status and the complete ordered
+page set. `POST /api/v1/receipts/:id/document/normalization` explicitly retries
+a failed or completed normalization and rejects already queued/running work,
+while page bytes are served by scoped
+receipt, document, and page IDs.
+
 Both merchant lists accept a trimmed display-name `query`, a `limit`, and a
 `cursor`, and are ordered by normalized name then stable ID so keyset
 pagination is deterministic. Receipt responses embed the linked brand and store
@@ -106,12 +112,12 @@ until a later storage-aware removal operation removes its files and metadata.
 Uploads stream into a bounded staging file while computing SHA-256, and actual
 JPEG, PNG, or PDF type and structure are checked without decoding pixels or
 rendering PDF content. Exact `(SHA-256, byte size)` uniqueness is store-wide.
-The initial bounded PDF validator intentionally accepts only PDFs whose page
+The upload boundary's bounded PDF validator intentionally accepts only PDFs whose page
 objects and classic cross-reference table are visible in the file structure;
-PDFs using compressed object/cross-reference streams are rejected until the
-isolated normalization renderer in the next milestone becomes the definitive
-parser. This conservative compatibility limit avoids decompressing or executing
-PDF content in the API process.
+PDFs using compressed object/cross-reference streams remain rejected at upload.
+The worker is the definitive parser for accepted PDFs; the API never decodes
+images or invokes Poppler. This conservative compatibility limit avoids
+decompressing or executing document content in the API process.
 Replacement promotes a new, separately named original before transactionally
 repointing metadata; the old path is then cleaned through a durable retry record.
 Removal first records cleanup and removes metadata transactionally, then deletes
@@ -120,13 +126,32 @@ original bytes are served only by receipt and document ID through the API.
 The API sweeps staging at startup, before listening, so a process crash cannot
 leave temporary uploads indefinitely.
 
+Each accepted original receives one single-purpose normalization job in the same
+database transaction as its document row. The worker claims a pending job with a
+conditional write and unique claim token, renders into worker staging, promotes
+revisioned page files, then publishes all page rows and the complete status in
+one SQLite transaction. Live claims are not reset by another worker; only claims
+older than the bounded render budget plus publication grace are reclaimed.
+Cleanup intents make promoted-but-unpublished files and replaced page revisions
+recoverable after a crash, and both API and worker startup drain those intents.
+A failed retry cannot remove the last complete page set. Profile and renderer
+versions are recorded on the document and every page.
+
 In Compose, `/data/receipt-report.db` and `/data/documents` share the
 `receipt-data` volume and therefore form one backup unit. Stop API and worker
 writers before copying the complete volume (including SQLite WAL sidecars), and
 restore the database and document tree together. The API and worker both need
 write access: the API will stage/promote originals, while the worker publishes
 derived pages. The migration container needs the database but does not receive
-`STORAGE_PATH` or access document paths through application code.
+`STORAGE_PATH` or access document paths through application code. It briefly
+runs as root only to initialize the named volume and hand its ownership to the
+unprivileged application user; API and worker runtimes run as `node`.
+
+The worker runtime alone contains Sharp/libvips and Poppler. Poppler runs as a
+separate process under address-space, CPU-time, wall-time, output-size, page,
+and decoded-pixel limits. The Compose worker has no network, drops Linux
+capabilities, is read-only outside its data volume and temporary directory, and
+uses memory and process-count limits. See ADR 0008.
 
 ## Trust boundaries
 

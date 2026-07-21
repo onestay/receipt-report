@@ -1,15 +1,24 @@
 services:
   migrate:
-    build: .
+    build:
+      context: .
+      target: api-runtime
+    user: root
     command:
-      ["pnpm", "--filter", "@receipt-report/database", "db:migrate:deploy"]
+      [
+        "sh",
+        "-c",
+        "pnpm --filter @receipt-report/database db:migrate:deploy && chown -R node:node /data",
+      ]
     environment:
       DATABASE_URL: file:/data/receipt-report.db
     volumes:
       - receipt-data:/data
 
   api:
-    build: .
+    build:
+      context: .
+      target: api-runtime
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -37,8 +46,9 @@ services:
       start_period: 10s
 
   worker:
-    build: .
-    command: ["node", "apps/worker/dist/index.js"]
+    build:
+      context: .
+      target: worker-runtime
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -46,6 +56,7 @@ services:
       DATABASE_URL: file:/data/receipt-report.db
       STORAGE_PATH: /data/documents
       WORKER_READY_FILE: /tmp/receipt-report-worker.ready
+      NORMALIZATION_VERIFY_RENDERER: "true"
     volumes:
       - receipt-data:/data
     healthcheck:
@@ -55,6 +66,14 @@ services:
       retries: 12
       start_period: 10s
     stop_grace_period: 10s
+    network_mode: none
+    mem_limit: 768m
+    pids_limit: 128
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
 
 volumes:
   receipt-data:

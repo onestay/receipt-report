@@ -313,6 +313,13 @@ export const receiptDocumentMediaTypeSchema = z.enum([
   "application/pdf",
 ]);
 export const receiptPageMediaTypeSchema = z.enum(["image/jpeg", "image/png"]);
+export const normalizationStatusSchema = z.enum([
+  "pending",
+  "running",
+  "complete",
+  "failed",
+]);
+export const NORMALIZATION_PROFILE_VERSION = "receipt-page-v1";
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 const relativeStoragePathSchema = z
   .string()
@@ -332,6 +339,8 @@ export const receiptPageSchema = z.object({
   width: z.number().int().positive(),
   height: z.number().int().positive(),
   sha256: sha256Schema,
+  profileVersion: z.string().min(1),
+  renderer: z.string().min(1),
   createdAt: z.string().datetime(),
 });
 export const receiptDocumentSchema = z.object({
@@ -344,13 +353,27 @@ export const receiptDocumentSchema = z.object({
   sha256: sha256Schema,
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
+  normalizationStatus: normalizationStatusSchema,
+  normalizationError: z.string().nullable(),
+  normalizationProfileVersion: z.string().nullable(),
+  normalizationRenderer: z.string().nullable(),
+  normalizationRequestedAt: z.string().datetime(),
+  normalizationStartedAt: z.string().datetime().nullable(),
+  normalizationCompletedAt: z.string().datetime().nullable(),
   pages: z.array(receiptPageSchema),
 });
+
+export const receiptPageResponseSchema = receiptPageSchema
+  .omit({ relativePath: true })
+  .extend({ imageUrl: z.string().startsWith("/api/v1/") });
 
 /** Public document metadata deliberately omits the internal storage path. */
 export const receiptDocumentResponseSchema = receiptDocumentSchema
   .omit({ relativePath: true, pages: true })
-  .extend({ originalUrl: z.string().startsWith("/api/v1/") });
+  .extend({
+    originalUrl: z.string().startsWith("/api/v1/"),
+    pages: z.array(receiptPageResponseSchema),
+  });
 
 export const duplicateDocumentDetailsSchema = z.object({
   receiptId: receiptIdSchema,
@@ -376,6 +399,7 @@ export type ReceiptUpdate = z.infer<typeof receiptUpdateSchema>;
 export type ReceiptDocumentResponse = z.infer<
   typeof receiptDocumentResponseSchema
 >;
+export type ReceiptPageResponse = z.infer<typeof receiptPageResponseSchema>;
 export type ReceiptSummary = z.infer<typeof receiptSummarySchema>;
 export type ReceiptDetail = z.infer<typeof receiptDetailSchema>;
 export type ReceiptList = z.infer<typeof receiptListSchema>;

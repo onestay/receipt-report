@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { access, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -16,6 +16,16 @@ describe("worker process", () => {
       join(tmpdir(), `receipt-report-worker-${process.pid}-`),
     );
     const readyFile = join(directory, "worker.ready");
+    const databaseUrl = `file:${join(directory, "worker.db")}`;
+    execFileSync(
+      "pnpm",
+      ["--filter", "@receipt-report/database", "db:migrate:deploy"],
+      {
+        cwd: process.cwd(),
+        env: { ...process.env, DATABASE_URL: databaseUrl },
+        stdio: "pipe",
+      },
+    );
     const child = spawn(
       process.execPath,
       [resolve("apps/worker/dist/index.js")],
@@ -23,9 +33,10 @@ describe("worker process", () => {
         env: {
           ...process.env,
           NODE_ENV: "production",
-          DATABASE_URL: `file:${join(directory, "worker.db")}`,
+          DATABASE_URL: databaseUrl,
           STORAGE_PATH: join(directory, "storage"),
           WORKER_READY_FILE: readyFile,
+          NORMALIZATION_VERIFY_RENDERER: "false",
         },
         stdio: ["ignore", "pipe", "pipe"],
       },

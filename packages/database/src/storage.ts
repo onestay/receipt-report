@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, type ReadStream } from "node:fs";
 import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 
 function safeSegment(value: string): string {
   if (!/^[A-Za-z0-9_-]+$/.test(value))
@@ -39,6 +39,16 @@ export function normalizedPagePath(
   return `pages/${safeSegment(documentId)}/page-${String(pageNumber).padStart(4, "0")}.png`;
 }
 
+export function normalizedPageRevisionPath(
+  documentId: string,
+  revision: string,
+  pageNumber: number,
+): string {
+  if (!Number.isInteger(pageNumber) || pageNumber < 1)
+    throw new Error("Invalid page number");
+  return `pages/${safeSegment(documentId)}/${safeSegment(revision)}/page-${String(pageNumber).padStart(4, "0")}.png`;
+}
+
 export class FilesystemDocumentStorage {
   readonly root: string;
 
@@ -60,17 +70,27 @@ export class FilesystemDocumentStorage {
   }
 
   async initialize(): Promise<void> {
-    await mkdir(this.path("staging"), { recursive: true, mode: 0o700 });
+    await Promise.all(
+      ["api", "worker"].map((namespace) =>
+        mkdir(this.path(`staging/${namespace}`), {
+          recursive: true,
+          mode: 0o700,
+        }),
+      ),
+    );
   }
 
-  async cleanupStaging(): Promise<void> {
-    await rm(this.path("staging"), { recursive: true, force: true });
+  async cleanupStaging(namespace = "api"): Promise<void> {
+    await rm(this.path(`staging/${safeSegment(namespace)}`), {
+      recursive: true,
+      force: true,
+    });
     await this.initialize();
   }
 
-  async stage(bytes: Uint8Array): Promise<string> {
+  async stage(bytes: Uint8Array, namespace = "api"): Promise<string> {
     await this.initialize();
-    const relativePath = `staging/${randomUUID()}.tmp`;
+    const relativePath = `staging/${safeSegment(namespace)}/${randomUUID()}.tmp`;
     await writeFile(this.path(relativePath), bytes, {
       flag: "wx",
       mode: 0o600,
@@ -84,7 +104,7 @@ export class FilesystemDocumentStorage {
     onCleanupFailure?: (relativePath: string) => Promise<void>,
   ): Promise<{ relativePath: string; byteSize: number; sha256: string }> {
     await this.initialize();
-    const relativePath = `staging/${randomUUID()}.tmp`;
+    const relativePath = `staging/api/${randomUUID()}.tmp`;
     const handle = await open(this.path(relativePath), "wx", 0o600);
     const hash = createHash("sha256");
     let byteSize = 0;
@@ -162,6 +182,10 @@ export class FilesystemDocumentStorage {
     return createReadStream(this.path(relativePath), options);
   }
 
+  absolutePath(relativePath: string): string {
+    return this.path(relativePath);
+  }
+
   async cleanup(relativePath: string): Promise<void> {
     await rm(this.path(relativePath), { force: true });
   }
@@ -174,6 +198,27 @@ export class FilesystemDocumentStorage {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
       throw error;
+    }
+  }
+}
+
+export async function retryDocumentFileCleanup(
+  database: PrismaClient,
+  storage: FilesystemDocumentStorage,
+): Promise<void> {
+  const pending = await database.documentFileCleanup.findMany({
+    orderBy: { createdAt: "asc" },
+    take: 100,
+  });
+  for (const cleanup of pending) {
+    try {
+      await storage.cleanup(cleanup.relativePath);
+      await database.documentFileCleanup.delete({ where: { id: cleanup.id } });
+    } catch {
+      await database.documentFileCleanup.update({
+        where: { id: cleanup.id },
+        data: { attempts: { increment: 1 }, lastError: "cleanup_failed" },
+      });
     }
   }
 }
@@ -198,6 +243,12 @@ export async function persistOriginalDocument(
   hooks: {
     afterPromote?: (() => Promise<void>) | undefined;
     onCleanupFailure?: ((relativePath: string) => Promise<void>) | undefined;
+    insideTransaction?:
+      | ((
+          transaction: Prisma.TransactionClient,
+          documentId: string,
+        ) => Promise<void>)
+      | undefined;
   } = {},
 ): Promise<{ id: string }> {
   const extension =
@@ -225,6 +276,7 @@ export async function persistOriginalDocument(
         },
         select: { id: true },
       });
+      await hooks.insideTransaction?.(transaction, document.id);
       await transaction.documentFileCleanup.delete({
         where: { relativePath: promotedPath },
       });

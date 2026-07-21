@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@receipt-report/config": "workspace:*",
-    "@receipt-report/database": "workspace:*"
+    "@receipt-report/contracts": "workspace:*",
+    "@receipt-report/database": "workspace:*",
+    "sharp": "0.34.5"
   }
 }

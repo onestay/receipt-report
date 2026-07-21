@@ -23,6 +23,11 @@ const sharedSchema = z
     DOCUMENT_MAX_DECODED_PIXELS: positiveLimit.default(200_000_000),
     DOCUMENT_MAX_REQUEST_BYTES: positiveLimit.default(26 * 1024 * 1024),
     DOCUMENT_VALIDATION_TIMEOUT_MS: positiveLimit.default(5_000),
+    NORMALIZATION_MAX_PAGE_PIXELS: positiveLimit.default(16_777_216),
+    NORMALIZATION_MAX_TOTAL_PIXELS: positiveLimit.default(100_000_000),
+    NORMALIZATION_TIMEOUT_MS: positiveLimit.default(120_000),
+    NORMALIZATION_MEMORY_MB: positiveLimit.default(512),
+    NORMALIZATION_POLL_MS: positiveLimit.default(500),
   })
   .superRefine((value, context) => {
     const databasePath = value.DATABASE_URL.slice("file:".length);
@@ -41,6 +46,16 @@ const sharedSchema = z
         message: "DOCUMENT_MAX_REQUEST_BYTES must exceed DOCUMENT_MAX_BYTES",
       });
     }
+    if (
+      value.NORMALIZATION_MAX_TOTAL_PIXELS < value.NORMALIZATION_MAX_PAGE_PIXELS
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["NORMALIZATION_MAX_TOTAL_PIXELS"],
+        message:
+          "NORMALIZATION_MAX_TOTAL_PIXELS must be at least NORMALIZATION_MAX_PAGE_PIXELS",
+      });
+    }
   });
 
 const apiSchema = sharedSchema.extend({
@@ -51,6 +66,10 @@ const apiSchema = sharedSchema.extend({
 
 const workerSchema = sharedSchema.extend({
   WORKER_READY_FILE: z.string().min(1),
+  NORMALIZATION_VERIFY_RENDERER: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((value) => value === "true"),
 });
 
 export type ApiConfig = z.infer<typeof apiSchema>;

@@ -11,6 +11,7 @@ import {
   DocumentStorageLimitError,
   EmptyDocumentError,
   normalizedPagePath,
+  normalizedPageRevisionPath,
   originalDocumentPath,
   persistOriginalDocument,
   replacementOriginalDocumentPath,
@@ -75,8 +76,13 @@ describe("filesystem document storage", () => {
     expect(normalizedPagePath("doc_123", 2)).toBe(
       "pages/doc_123/page-0002.png",
     );
+    expect(normalizedPageRevisionPath("doc_123", "profile-1", 2)).toBe(
+      "pages/doc_123/profile-1/page-0002.png",
+    );
     expect(() => originalDocumentPath("../escape", "pdf")).toThrow();
     expect(() => normalizedPagePath("doc", 0)).toThrow();
+    expect(() => normalizedPageRevisionPath("doc", "revision", 0)).toThrow();
+    expect(() => normalizedPageRevisionPath("doc", "../escape", 1)).toThrow();
     await expect(storage.read("../escape")).rejects.toThrow("escapes root");
     await expect(storage.promote("originals/x", "safe.pdf")).rejects.toThrow(
       "staged",
@@ -127,7 +133,7 @@ describe("filesystem document storage", () => {
       storage.stageStream(Readable.from([Buffer.from("too large")]), 2),
     ).rejects.toBeInstanceOf(DocumentStorageLimitError);
     await storage.initialize();
-    expect(await readdir(join(storage.root, "staging"))).toEqual([]);
+    expect(await readdir(join(storage.root, "staging/api"))).toEqual([]);
   });
 
   it("reports failed staging cleanup for durable retry", async () => {
@@ -292,6 +298,8 @@ describe("document persistence coordinator", () => {
       width: 1,
       height: 1,
       sha256: "d".repeat(64),
+      profileVersion: "receipt-page-v1",
+      renderer: "synthetic/1",
     };
     await db().receiptPage.create({ data: page });
     await expect(

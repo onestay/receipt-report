@@ -1,16 +1,22 @@
 import { startWorker } from "./worker.js";
 
-void startWorker()
-  .then(({ stop }) => {
-    const shutdown = async (signal: string) => {
-      console.log(`receipt-report-worker received ${signal}`);
-      await stop();
-      process.exit(0);
-    };
-    process.once("SIGINT", () => void shutdown("SIGINT"));
-    process.once("SIGTERM", () => void shutdown("SIGTERM"));
-  })
-  .catch((error: unknown) => {
+const worker = startWorker();
+let shuttingDown = false;
+
+async function shutdown(signal: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`receipt-report-worker received ${signal}`);
+  const { stop } = await worker;
+  await stop();
+}
+
+process.once("SIGINT", () => void shutdown("SIGINT"));
+process.once("SIGTERM", () => void shutdown("SIGTERM"));
+
+void worker.catch((error: unknown) => {
+  if (!shuttingDown) {
     console.error(error);
     process.exitCode = 1;
-  });
+  }
+});
