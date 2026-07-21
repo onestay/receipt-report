@@ -18,7 +18,7 @@ export async function startServer(
   const journalMode = await enableWal(database);
   reportJournalMode(journalMode);
   const documentStorage = new FilesystemDocumentStorage(config.STORAGE_PATH);
-  await documentStorage.initialize();
+  await documentStorage.cleanupStaging();
   await retryDocumentFileCleanup(database, documentStorage);
 
   const app = createApp({

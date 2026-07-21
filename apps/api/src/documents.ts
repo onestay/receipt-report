@@ -234,8 +234,11 @@ export class DocumentRepository {
       current.id,
       documentExtension(mediaType),
     );
-    await this.storage.promote(staged.relativePath, target);
+    await this.database.documentFileCleanup.create({
+      data: { relativePath: target },
+    });
     try {
+      await this.storage.promote(staged.relativePath, target);
       const updated = await this.database.$transaction(async (transaction) => {
         const result = await transaction.receiptDocument.updateMany({
           where: { id: current.id, updatedAt: current.updatedAt },
@@ -254,6 +257,9 @@ export class DocumentRepository {
         await transaction.documentFileCleanup.create({
           data: { relativePath: current.relativePath },
         });
+        await transaction.documentFileCleanup.delete({
+          where: { relativePath: target },
+        });
         return transaction.receiptDocument.findUniqueOrThrow({
           where: { id: current.id },
         });
@@ -263,6 +269,9 @@ export class DocumentRepository {
     } catch (error) {
       try {
         await this.storage.cleanup(target);
+        await this.database.documentFileCleanup.deleteMany({
+          where: { relativePath: target },
+        });
       } catch {
         await this.recordFailedCleanup(target);
       }

@@ -117,6 +117,8 @@ repointing metadata; the old path is then cleaned through a durable retry record
 Removal first records cleanup and removes metadata transactionally, then deletes
 bytes. Public document responses omit internal relative storage paths, and
 original bytes are served only by receipt and document ID through the API.
+The API sweeps staging at startup, before listening, so a process crash cannot
+leave temporary uploads indefinitely.
 
 In Compose, `/data/receipt-report.db` and `/data/documents` share the
 `receipt-data` volume and therefore form one backup unit. Stop API and worker

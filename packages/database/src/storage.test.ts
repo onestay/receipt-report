@@ -58,6 +58,16 @@ describe("filesystem document storage", () => {
     expect(await storage.exists(target)).toBe(false);
   });
 
+  it("sweeps crash-left staging files before accepting uploads", async () => {
+    const staged = await storage.stage(new Uint8Array([1]));
+    expect(await storage.exists(staged)).toBe(true);
+    await storage.cleanupStaging();
+    expect(await storage.exists(staged)).toBe(false);
+    await expect(storage.stage(new Uint8Array([2]))).resolves.toMatch(
+      /^staging\//,
+    );
+  });
+
   it("confines generated and caller-provided paths", async () => {
     expect(originalDocumentPath("doc_123", "jpg")).toBe(
       "originals/doc_123/original.jpg",

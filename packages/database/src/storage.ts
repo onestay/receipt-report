@@ -63,6 +63,11 @@ export class FilesystemDocumentStorage {
     await mkdir(this.path("staging"), { recursive: true, mode: 0o700 });
   }
 
+  async cleanupStaging(): Promise<void> {
+    await rm(this.path("staging"), { recursive: true, force: true });
+    await this.initialize();
+  }
+
   async stage(bytes: Uint8Array): Promise<string> {
     await this.initialize();
     const relativePath = `staging/${randomUUID()}.tmp`;
