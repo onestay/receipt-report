@@ -67,3 +67,17 @@ Brands and stores can be created in place without discarding receipt edits.
 Those merchant records are saved immediately and independently of the receipt.
 Changing or clearing a brand while a store is selected requires an explicit
 in-page confirmation because confirming also clears the incompatible store.
+
+## Manual document review workflow
+
+An optional JPEG, PNG, or PDF can be selected while creating a manual receipt.
+The receipt record is created first; if upload fails, entered fields and the
+selected file remain available and retrying does not create a second receipt.
+The saved receipt is always linked from that recovery state.
+
+Receipt detail shows retained-original metadata, open/download actions, and the
+normalization state. Prepared pages remain in source order and support keyboard
+navigation. Upload cancellation, duplicate-document links, explicit
+replace/remove confirmations, failed-normalization retry, page loading failures,
+and the operator-configured upload limit are visible without exposing internal
+storage paths.

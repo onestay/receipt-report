@@ -4,6 +4,7 @@ import express, { type ErrorRequestHandler, type Express } from "express";
 import type { ApiConfig } from "@receipt-report/config";
 import {
   apiErrorSchema,
+  documentUploadConfigurationSchema,
   healthResponseSchema,
   idSchema,
   merchantBrandCreateSchema,
@@ -247,6 +248,14 @@ export function createApp(options: AppOptions = {}): Express {
         maxImageHeight: config.DOCUMENT_MAX_IMAGE_HEIGHT,
         maxDecodedPixels: config.DOCUMENT_MAX_DECODED_PIXELS,
         timeoutMs: config.DOCUMENT_VALIDATION_TIMEOUT_MS,
+      });
+      app.get("/api/v1/document-upload-configuration", (_request, response) => {
+        response.json(
+          documentUploadConfigurationSchema.parse({
+            maxBytes: config.DOCUMENT_MAX_BYTES,
+            acceptedMediaTypes: ["image/jpeg", "image/png", "application/pdf"],
+          }),
+        );
       });
       const ingest =
         (replace: boolean) =>

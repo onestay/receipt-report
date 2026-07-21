@@ -28,6 +28,29 @@ function MerchantHarness({
   return <MerchantIdentity value={value} onChange={setValue} />;
 }
 
+const uploadConfiguration = {
+  maxBytes: 25 * 1024 * 1024,
+  acceptedMediaTypes: ["image/jpeg", "image/png", "application/pdf"],
+};
+
+function stubAppFetch(
+  receiptFetch: (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ) => Response | Promise<Response>,
+) {
+  const routed = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url === "/api/v1/document-upload-configuration")
+      return Promise.resolve(new Response(JSON.stringify(uploadConfiguration)));
+    if (/\/api\/v1\/receipts\/[^/]+\/document$/.test(url) && !init?.method)
+      return Promise.resolve(new Response(null, { status: 404 }));
+    return receiptFetch(input, init);
+  });
+  vi.stubGlobal("fetch", routed);
+  return routed;
+}
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -98,7 +121,7 @@ describe("application shell", () => {
           { status: 200 },
         ),
       );
-    vi.stubGlobal("fetch", fetchMock);
+    stubAppFetch(fetchMock);
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Synthetic Markt")).toBeInTheDocument();
@@ -139,7 +162,7 @@ describe("application shell", () => {
           { status: 200 },
         ),
       );
-    vi.stubGlobal("fetch", fetchMock);
+    stubAppFetch(fetchMock);
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: "Load more" }));
     expect(await screen.findByText("Second")).toBeInTheDocument();
@@ -167,7 +190,7 @@ describe("application shell", () => {
         { status: 201 },
       ),
     );
-    vi.stubGlobal("fetch", fetchMock);
+    stubAppFetch(fetchMock);
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "Save receipt" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("review");
@@ -191,6 +214,106 @@ describe("application shell", () => {
     expect(
       await screen.findByRole("heading", { name: "Could not open receipt" }),
     ).toBeInTheDocument();
+  });
+
+  it("creates once, preserves fields, and retries a failed document upload", async () => {
+    history.replaceState({}, "", "/receipts/new");
+    const created = {
+      id: "cm12345678901234567890123",
+      merchantRaw: "Synthetic upload",
+      merchantBrand: null,
+      merchantStore: null,
+      purchaseDate: "2026-07-19",
+      purchaseTime: null,
+      currency: "EUR",
+      notes: "keep this",
+      totalCents: 1234,
+      createdAt: "2026-07-21T00:00:00.000Z",
+      updatedAt: "2026-07-21T00:00:00.000Z",
+      lineItems: [],
+    };
+    const uploaded = {
+      id: "cm22345678901234567890123",
+      receiptId: created.id,
+      originalFilename: "receipt.png",
+      mediaType: "image/png",
+      byteSize: 3,
+      sha256: "a".repeat(64),
+      createdAt: created.createdAt,
+      updatedAt: created.updatedAt,
+      normalizationStatus: "pending",
+      normalizationError: null,
+      normalizationProfileVersion: null,
+      normalizationRenderer: null,
+      normalizationRequestedAt: created.createdAt,
+      normalizationStartedAt: null,
+      normalizationCompletedAt: null,
+      originalUrl: `/api/v1/receipts/${created.id}/document/original`,
+      pages: [],
+    };
+    let uploadAttempts = 0;
+    const receiptFetch = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === "/api/v1/receipts" && init?.method === "POST")
+          return new Response(JSON.stringify(created), { status: 201 });
+        if (url.endsWith("/document") && init?.method === "POST") {
+          uploadAttempts += 1;
+          return uploadAttempts === 1
+            ? new Response(
+                JSON.stringify({
+                  error: { code: "malformed_document", message: "bad" },
+                }),
+                { status: 422 },
+              )
+            : new Response(JSON.stringify(uploaded), { status: 201 });
+        }
+        if (url === `/api/v1/receipts/${created.id}`)
+          return new Response(JSON.stringify(created));
+        throw new Error(`Unexpected request: ${url}`);
+      },
+    );
+    stubAppFetch(receiptFetch);
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Merchant"), {
+      target: { value: created.merchantRaw },
+    });
+    fireEvent.change(screen.getByLabelText("Purchase date"), {
+      target: { value: created.purchaseDate },
+    });
+    fireEvent.change(screen.getByLabelText("Total"), {
+      target: { value: "12,34" },
+    });
+    fireEvent.change(screen.getByLabelText(/Notes/), {
+      target: { value: created.notes },
+    });
+    fireEvent.change(screen.getByLabelText(/Choose or drop/), {
+      target: {
+        files: [new File(["png"], "receipt.png", { type: "image/png" })],
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save receipt" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Receipt saved. This file is malformed",
+    );
+    expect(screen.getByLabelText("Merchant")).toHaveValue(created.merchantRaw);
+    expect(screen.getByLabelText(/Notes/)).toHaveValue(created.notes);
+    expect(screen.getByText("receipt.png")).toBeVisible();
+    expect(
+      screen.getByRole("link", { name: "Open the saved receipt" }),
+    ).toHaveAttribute("href", `/receipts/${created.id}`);
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry upload" }));
+    expect(
+      await screen.findByRole("heading", { name: "Edit receipt" }),
+    ).toBeVisible();
+    expect(
+      receiptFetch.mock.calls.filter(
+        ([input, init]) =>
+          String(input) === "/api/v1/receipts" && init?.method === "POST",
+      ),
+    ).toHaveLength(1);
+    expect(uploadAttempts).toBe(2);
   });
 
   it("assigns a scoped merchant store and confirms clearing its brand", async () => {
@@ -226,7 +349,7 @@ describe("application shell", () => {
         );
       throw new Error(`Unexpected request: ${url}`);
     });
-    vi.stubGlobal("fetch", fetchMock);
+    stubAppFetch(fetchMock);
     render(<App />);
     const brandSelect = screen.getByLabelText("Brand");
     fireEvent.focus(brandSelect);
@@ -268,7 +391,7 @@ describe("application shell", () => {
         return new Response(JSON.stringify({ brands: [], nextCursor: null }));
       },
     );
-    vi.stubGlobal("fetch", fetchMock);
+    stubAppFetch(fetchMock);
     render(<App />);
     fireEvent.change(screen.getByLabelText("Merchant"), {
       target: { value: "REWE Markt 42" },
@@ -302,7 +425,7 @@ describe("application shell", () => {
     ],
   ])("preserves input after a %s failure", async (_name, response, message) => {
     history.replaceState({}, "", "/receipts/new");
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+    stubAppFetch(vi.fn().mockResolvedValue(response));
     render(<App />);
     fireEvent.change(screen.getByLabelText("Merchant"), {
       target: { value: "Synthetic" },
@@ -320,10 +443,7 @@ describe("application shell", () => {
 
   it("uses an ambiguity-safe message for a network failure", async () => {
     history.replaceState({}, "", "/receipts/new");
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockRejectedValue(new TypeError("raw failure")),
-    );
+    stubAppFetch(vi.fn().mockRejectedValue(new TypeError("raw failure")));
     render(<App />);
     fireEvent.change(screen.getByLabelText("Merchant"), {
       target: { value: "Synthetic" },
@@ -342,8 +462,7 @@ describe("application shell", () => {
 
   it("renders a direct detail route", () => {
     history.replaceState({}, "", "/receipts/cm12345678901234567890123");
-    vi.stubGlobal(
-      "fetch",
+    stubAppFetch(
       vi.fn().mockResolvedValue(new Response(null, { status: 404 })),
     );
     render(<App />);
@@ -397,7 +516,7 @@ describe("merchant identity controls", () => {
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ brands: [brand], nextCursor: null })),
       );
-    vi.stubGlobal("fetch", fetchMock);
+    stubAppFetch(fetchMock);
     render(<MerchantHarness />);
     fireEvent.focus(screen.getByLabelText("Brand"));
     expect(await screen.findByRole("alert")).toHaveTextContent(
@@ -425,7 +544,7 @@ describe("merchant identity controls", () => {
         return new Response(JSON.stringify({ brands: [], nextCursor: null }));
       },
     );
-    vi.stubGlobal("fetch", fetchMock);
+    stubAppFetch(fetchMock);
     render(<MerchantHarness />);
     fireEvent.click(screen.getByRole("button", { name: "+ Create brand" }));
     fireEvent.change(screen.getByLabelText("Brand name"), {
@@ -450,7 +569,7 @@ describe("merchant identity controls", () => {
         return new Response(JSON.stringify({ stores: [], nextCursor: null }));
       },
     );
-    vi.stubGlobal("fetch", fetchMock);
+    stubAppFetch(fetchMock);
     render(
       <MerchantHarness
         initial={{ merchantBrandId: brand.id, merchantStoreId: null }}
@@ -554,7 +673,7 @@ describe("receipt editor", () => {
       .mockResolvedValueOnce(
         new Response(JSON.stringify(receipt), { status: 200 }),
       );
-    vi.stubGlobal("fetch", fetchMock);
+    stubAppFetch(fetchMock);
     render(<App />);
     expect(
       await screen.findByRole("heading", { name: "Edit receipt" }),
@@ -624,7 +743,7 @@ describe("receipt editor", () => {
         new Response(JSON.stringify(receipt), { status: 200 }),
       )
       .mockReturnValueOnce(saveResponse);
-    vi.stubGlobal("fetch", fetchMock);
+    stubAppFetch(fetchMock);
     render(<App />);
     const button = await screen.findByRole("button", {
       name: "Save changes",
@@ -652,7 +771,7 @@ describe("receipt editor", () => {
         new Response(JSON.stringify(receipt), { status: 200 }),
       )
       .mockResolvedValueOnce(new Response(null, { status: 500 }));
-    vi.stubGlobal("fetch", fetchMock);
+    stubAppFetch(fetchMock);
     render(<App />);
     const button = await screen.findByRole("button", {
       name: "Save changes",
@@ -671,8 +790,7 @@ describe("receipt editor", () => {
   });
   it("shows not-found and retryable load states", async () => {
     history.replaceState({}, "", `/receipts/${receipt.id}`);
-    vi.stubGlobal(
-      "fetch",
+    stubAppFetch(
       vi.fn().mockResolvedValue(new Response(null, { status: 404 })),
     );
     render(<App />);
@@ -688,7 +806,7 @@ describe("receipt editor", () => {
       .mockResolvedValueOnce(
         new Response(JSON.stringify(receipt), { status: 200 }),
       );
-    vi.stubGlobal("fetch", fetchMock);
+    stubAppFetch(fetchMock);
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
     expect(
@@ -703,7 +821,7 @@ describe("receipt editor", () => {
         new Response(JSON.stringify(receipt), { status: 200 }),
       )
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
-    vi.stubGlobal("fetch", fetchMock);
+    stubAppFetch(fetchMock);
     vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
@@ -717,7 +835,7 @@ describe("receipt editor", () => {
       .mockResolvedValue(
         new Response(JSON.stringify(receipt), { status: 200 }),
       );
-    vi.stubGlobal("fetch", fetchMock);
+    stubAppFetch(fetchMock);
     vi.spyOn(window, "confirm").mockReturnValue(false);
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
@@ -728,8 +846,7 @@ describe("receipt editor", () => {
   });
   it("guards dirty navigation and browser unload", async () => {
     history.replaceState({}, "", `/receipts/${receipt.id}`);
-    vi.stubGlobal(
-      "fetch",
+    stubAppFetch(
       vi
         .fn()
         .mockResolvedValue(
@@ -754,8 +871,7 @@ describe("receipt editor", () => {
   });
   it("does not guard unload while clean", async () => {
     history.replaceState({}, "", `/receipts/${receipt.id}`);
-    vi.stubGlobal(
-      "fetch",
+    stubAppFetch(
       vi
         .fn()
         .mockResolvedValue(
@@ -771,8 +887,7 @@ describe("receipt editor", () => {
   it("restores the receipt after a cancelled browser back navigation", async () => {
     history.replaceState({}, "", "/receipts");
     history.pushState({}, "", `/receipts/${receipt.id}`);
-    vi.stubGlobal(
-      "fetch",
+    stubAppFetch(
       vi
         .fn()
         .mockResolvedValue(
@@ -798,8 +913,7 @@ describe("receipt editor", () => {
   it("focuses Add item after removing the final line item", async () => {
     const oneItem = { ...receipt, lineItems: receipt.lineItems.slice(0, 1) };
     history.replaceState({}, "", `/receipts/${receipt.id}`);
-    vi.stubGlobal(
-      "fetch",
+    stubAppFetch(
       vi
         .fn()
         .mockResolvedValue(

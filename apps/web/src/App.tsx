@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
   apiErrorSchema,
   merchantBrandListSchema,
@@ -14,6 +14,13 @@ import {
   type ReceiptDetail,
   type ReceiptSummary,
 } from "@receipt-report/contracts";
+import {
+  DocumentFileField,
+  DocumentPanel,
+  DocumentUploadError,
+  failureMessage,
+  uploadReceiptDocument,
+} from "./DocumentPanel.js";
 
 type Route = { page: "list" | "new" | "detail"; id?: string };
 const money = new Intl.NumberFormat("de-DE", {
@@ -705,6 +712,10 @@ function CreateReceipt() {
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [serverError, setServerError] = useState("");
+  const [documentFile, setDocumentFile] = useState<File | null>(null);
+  const [createdReceiptId, setCreatedReceiptId] = useState<string>();
+  const [duplicateReceiptId, setDuplicateReceiptId] = useState<string>();
+  const uploadAbort = useRef<AbortController | undefined>(undefined);
   const [merchantIdentity, setMerchantIdentity] =
     useState<MerchantIdentityValue>({
       merchantBrandId: null,
@@ -737,28 +748,52 @@ function CreateReceipt() {
         totalCents: total,
         notes: String(data.get("notes") || "") || null,
       };
-      const response = await fetch("/api/v1/receipts", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!response.ok) {
-        const parsed = apiErrorSchema.safeParse(await response.json());
-        setServerError(
-          parsed.success && parsed.data.error.code === "validation_error"
-            ? "Please check the entered values."
-            : "The receipt may not have been saved. Check the ledger before retrying.",
-        );
-        return;
+      let receiptId = createdReceiptId;
+      if (!receiptId) {
+        const response = await fetch("/api/v1/receipts", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!response.ok) {
+          const parsed = apiErrorSchema.safeParse(await response.json());
+          setServerError(
+            parsed.success && parsed.data.error.code === "validation_error"
+              ? "Please check the entered values."
+              : "The receipt may not have been saved. Check the ledger before retrying.",
+          );
+          return;
+        }
+        const created = receiptDetailSchema.safeParse(await response.json());
+        if (!created.success) {
+          setServerError(
+            "The receipt may have been saved, but confirmation was incomplete. Check the ledger before retrying.",
+          );
+          return;
+        }
+        receiptId = created.data.id;
+        setCreatedReceiptId(receiptId);
       }
-      const created = receiptDetailSchema.safeParse(await response.json());
-      if (!created.success) {
-        setServerError(
-          "The receipt may have been saved, but confirmation was incomplete. Check the ledger before retrying.",
-        );
-        return;
+      if (documentFile) {
+        const controller = new AbortController();
+        uploadAbort.current = controller;
+        try {
+          await uploadReceiptDocument(
+            receiptId,
+            documentFile,
+            false,
+            controller.signal,
+          );
+        } catch (error) {
+          setServerError(`Receipt saved. ${failureMessage(error)}`);
+          if (error instanceof DocumentUploadError)
+            setDuplicateReceiptId(error.duplicateReceiptId);
+          return;
+        } finally {
+          uploadAbort.current = undefined;
+        }
       }
-      navigate(`/receipts/${created.data.id}`);
+      navigate(`/receipts/${receiptId}`);
     } catch {
       setServerError(
         "The receipt may not have been saved. Check the ledger before retrying.",
@@ -788,7 +823,15 @@ function CreateReceipt() {
       )}
       {serverError && (
         <div className="banner banner--error" role="alert">
-          {serverError}
+          {serverError}{" "}
+          {createdReceiptId && (
+            <a href={`/receipts/${createdReceiptId}`}>Open the saved receipt</a>
+          )}{" "}
+          {duplicateReceiptId && (
+            <a href={`/receipts/${duplicateReceiptId}`}>
+              Open the existing receipt
+            </a>
+          )}
         </div>
       )}
       <form
@@ -865,6 +908,30 @@ function CreateReceipt() {
           </label>
           <textarea id="notes" name="notes" rows={4} />
         </div>
+        <div className="field field--wide">
+          <span className="field-label">
+            Receipt document <span>optional</span>
+          </span>
+          <DocumentFileField
+            id="new-receipt-document"
+            file={documentFile}
+            disabled={submitting}
+            onFile={setDocumentFile}
+            onError={setServerError}
+          />
+        </div>
+        {submitting && documentFile && createdReceiptId && (
+          <div className="field field--wide upload-progress">
+            <progress aria-label="Uploading document" />
+            <button
+              type="button"
+              className="button button--quiet"
+              onClick={() => uploadAbort.current?.abort()}
+            >
+              Cancel upload
+            </button>
+          </div>
+        )}
         <div className="form-actions">
           <Link href="/receipts" className="button button--quiet">
             Cancel
@@ -874,7 +941,13 @@ function CreateReceipt() {
             disabled={submitting}
             aria-busy={submitting}
           >
-            {submitting ? "Saving…" : "Save receipt"}
+            {submitting
+              ? createdReceiptId
+                ? "Uploading…"
+                : "Saving…"
+              : createdReceiptId
+                ? "Retry upload"
+                : "Save receipt"}
           </button>
         </div>
       </form>
@@ -1341,6 +1414,7 @@ function ReceiptEditor({ id }: { id: string }) {
           </div>
         </aside>
       </div>
+      <DocumentPanel receiptId={id} />
     </section>
   );
 }

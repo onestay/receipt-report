@@ -29,6 +29,8 @@ jobs:
       - run: pnpm test:coverage
       - run: pnpm build
       - run: pnpm exec playwright install --with-deps chromium
+      - name: Install document renderer tools
+        run: sudo apt-get update && sudo apt-get install --yes poppler-utils util-linux
       - run: pnpm test:e2e
       - uses: actions/upload-artifact@v4
         if: always()

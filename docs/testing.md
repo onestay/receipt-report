@@ -42,6 +42,13 @@ Core workflows should eventually cover:
 - Browsing, searching, and filtering receipts
 - Viewing weekly and monthly reports
 
+The document slice covers create-first upload recovery without duplicate
+receipts, configured client-side validation, accessible busy/cancel states,
+normalization polling and retry, ordered keyboard-navigable pages, and confirmed
+replacement/removal. Playwright exercises real image/PDF normalization with the
+API and worker; component tests deterministically cover failure states that
+would otherwise require corrupting the queue.
+
 Playwright should collect traces, screenshots, and videos on failure as CI
 artifacts. Tests should prefer accessible roles and labels over implementation
 selectors.

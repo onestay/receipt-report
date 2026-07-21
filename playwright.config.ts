@@ -14,7 +14,7 @@ export default defineConfig({
   reporter: [["list"], ["html", { open: "never" }]],
   webServer: {
     command:
-      "pnpm --filter @receipt-report/database db:migrate:deploy && pnpm --filter @receipt-report/api start",
+      "node scripts/reset-e2e-runtime.mjs && pnpm --filter @receipt-report/database db:migrate:deploy && concurrently -k -n api,worker 'pnpm --filter @receipt-report/api start' 'pnpm --filter @receipt-report/worker start'",
     env: {
       ...process.env,
       PORT: String(port),
@@ -22,6 +22,8 @@ export default defineConfig({
       DATABASE_URL: `file:${resolve(".runtime/e2e.db")}`,
       STORAGE_PATH: resolve(".runtime/e2e-storage"),
       WEB_DIST_DIR: "../web/dist",
+      WORKER_READY_FILE: resolve(".runtime/e2e-worker.ready"),
+      NORMALIZATION_VERIFY_RENDERER: "true",
     },
     port,
     reuseExistingServer: !process.env.CI,

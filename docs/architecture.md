@@ -56,18 +56,23 @@ planning commit.
 
 Versioned REST resources are flat rather than nested:
 
-| Resource                        | Purpose                                             |
-| ------------------------------- | --------------------------------------------------- |
-| `/api/v1/receipts`              | Receipt CRUD and list                               |
-| `/api/v1/merchant-brands`       | Canonical merchant brand CRUD and list              |
-| `/api/v1/merchant-stores`       | Store CRUD and list, filtered by `brandId`          |
-| `/api/v1/receipts/:id/document` | Original upload, metadata, replacement, and removal |
+| Resource                                | Purpose                                             |
+| --------------------------------------- | --------------------------------------------------- |
+| `/api/v1/receipts`                      | Receipt CRUD and list                               |
+| `/api/v1/merchant-brands`               | Canonical merchant brand CRUD and list              |
+| `/api/v1/merchant-stores`               | Store CRUD and list, filtered by `brandId`          |
+| `/api/v1/document-upload-configuration` | Active media-type and byte-size upload limits       |
+| `/api/v1/receipts/:id/document`         | Original upload, metadata, replacement, and removal |
 
 Document responses also expose normalization status and the complete ordered
 page set. `POST /api/v1/receipts/:id/document/normalization` explicitly retries
 a failed or completed normalization and rejects already queued/running work,
 while page bytes are served by scoped
 receipt, document, and page IDs.
+
+The web client reads the upload-configuration resource before selecting a file
+so its size guidance and local rejection use the operator's actual configured
+limit rather than a duplicated build-time constant.
 
 Both merchant lists accept a trimmed display-name `query`, a `limit`, and a
 `cursor`, and are ordered by normalized name then stable ID so keyset
