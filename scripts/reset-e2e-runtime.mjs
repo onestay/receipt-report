@@ -1,7 +1,8 @@
-import { rmSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
 const runtime = resolve(".runtime");
+mkdirSync(runtime, { recursive: true });
 for (const name of ["e2e.db", "e2e-storage", "e2e-worker.ready"]) {
   const target = resolve(runtime, name);
   if (dirname(target) !== runtime)
