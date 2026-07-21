@@ -197,6 +197,30 @@ describe("receipt document API", () => {
     expect(await database.receiptDocument.count()).toBe(0);
   });
 
+  it("records multipart rejection cleanup failures for retry", async () => {
+    const receiptId = await receipt();
+    class FailingStagingCleanupStorage extends FilesystemDocumentStorage {
+      override async cleanup(path: string): Promise<void> {
+        if (path.startsWith("staging/")) throw new Error("injected cleanup");
+        await super.cleanup(path);
+      }
+    }
+    storage = new FailingStagingCleanupStorage(storage.root);
+    await request(app())
+      .post(`/api/v1/receipts/${receiptId}/document`)
+      .attach("document", png, "one.png")
+      .attach("document", jpeg, "two.jpg")
+      .expect(400);
+    const pending = await database.documentFileCleanup.findFirstOrThrow({
+      where: { relativePath: { startsWith: "staging/" } },
+    });
+    expect(pending).toMatchObject({ lastError: "cleanup_failed" });
+    storage = new FilesystemDocumentStorage(storage.root);
+    await retryDocumentFileCleanup(database, storage);
+    expect(await database.documentFileCleanup.count()).toBe(0);
+    expect(await storage.exists(pending.relativePath)).toBe(false);
+  });
+
   it("replaces only explicitly, promotes before cleanup, and removes safely", async () => {
     const receiptId = await receipt();
     const first = await request(app())

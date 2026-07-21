@@ -97,6 +97,15 @@ export async function stageMultipartDocument(
     invalidPart = true;
   });
 
+  const cleanupStagedPath = async (relativePath: string): Promise<void> => {
+    try {
+      await storage.cleanup(relativePath);
+    } catch (error) {
+      if (!onCleanupFailure) throw error;
+      await onCleanupFailure(relativePath);
+    }
+  };
+
   try {
     await new Promise<void>((resolve, reject) => {
       const fail = (error: Error) => reject(error);
@@ -107,14 +116,14 @@ export async function stageMultipartDocument(
     });
     const [result] = await Promise.all(staged);
     if (fileTooLarge) {
-      if (result) await storage.cleanup(result.relativePath);
+      if (result) await cleanupStagedPath(result.relativePath);
       throw new DocumentRequestError(
         "document_too_large",
         "Document upload is too large",
       );
     }
     if (fileCount !== 1 || invalidPart || !result) {
-      if (result) await storage.cleanup(result.relativePath);
+      if (result) await cleanupStagedPath(result.relativePath);
       throw new DocumentRequestError(
         "multipart_error",
         "Upload exactly one document file",
@@ -129,7 +138,7 @@ export async function stageMultipartDocument(
     await Promise.all(
       results.flatMap((result) =>
         result.status === "fulfilled"
-          ? [storage.cleanup(result.value.relativePath)]
+          ? [cleanupStagedPath(result.value.relativePath)]
           : [],
       ),
     );
