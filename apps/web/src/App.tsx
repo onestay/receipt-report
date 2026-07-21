@@ -1,8 +1,16 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import {
   apiErrorSchema,
+  merchantBrandListSchema,
+  merchantBrandSchema,
+  merchantStoreListSchema,
+  merchantStoreSchema,
+  normalizeMerchantAddressKey,
+  normalizeMerchantName,
   receiptDetailSchema,
   receiptListSchema,
+  type MerchantBrand,
+  type MerchantStore,
   type ReceiptDetail,
   type ReceiptSummary,
 } from "@receipt-report/contracts";
@@ -274,10 +282,434 @@ function quantityInput(value: number | null): string {
     .replace(".", ",");
 }
 
+export type MerchantIdentityValue = {
+  merchantBrandId: string | null;
+  merchantStoreId: string | null;
+};
+
+export function MerchantIdentity({
+  value,
+  onChange,
+  selectedBrandName,
+  selectedStoreName,
+}: {
+  value: MerchantIdentityValue;
+  onChange: (value: MerchantIdentityValue) => void;
+  selectedBrandName?: string | undefined;
+  selectedStoreName?: string | undefined;
+}) {
+  const [brands, setBrands] = useState<MerchantBrand[]>([]);
+  const [stores, setStores] = useState<MerchantStore[]>([]);
+  const [loadError, setLoadError] = useState("");
+  const [creating, setCreating] = useState<"brand" | "store" | null>(null);
+  const [createError, setCreateError] = useState("");
+  const [brandName, setBrandName] = useState("");
+  const [storeDraft, setStoreDraft] = useState({
+    name: "",
+    street: "",
+    postalCode: "",
+    city: "",
+  });
+  const [pendingBrandId, setPendingBrandId] = useState<
+    string | null | undefined
+  >();
+
+  const loadBrands = useCallback(async () => {
+    setLoadError("");
+    try {
+      const response = await fetch("/api/v1/merchant-brands?limit=100");
+      if (!response.ok) throw new Error("load");
+      setBrands(merchantBrandListSchema.parse(await response.json()).brands);
+    } catch {
+      setLoadError("Merchant brands could not be loaded.");
+    }
+  }, []);
+
+  const loadStores = useCallback(async () => {
+    if (!value.merchantBrandId) {
+      setStores([]);
+      return;
+    }
+    setLoadError("");
+    try {
+      const response = await fetch(
+        `/api/v1/merchant-stores?brandId=${encodeURIComponent(value.merchantBrandId)}&limit=100`,
+      );
+      if (!response.ok) throw new Error("load");
+      setStores(merchantStoreListSchema.parse(await response.json()).stores);
+    } catch {
+      setLoadError("Stores could not be loaded.");
+    }
+  }, [value.merchantBrandId]);
+  useEffect(() => void loadStores(), [loadStores]);
+
+  const chooseBrand = (brandId: string | null) => {
+    if (value.merchantStoreId && brandId !== value.merchantBrandId) {
+      setPendingBrandId(brandId);
+      return;
+    }
+    onChange({ merchantBrandId: brandId, merchantStoreId: null });
+  };
+
+  async function createBrand() {
+    const name = brandName.trim();
+    if (!name) return setCreateError("Enter a brand name.");
+    setCreateError("");
+    const response = await fetch("/api/v1/merchant-brands", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name }),
+    }).catch(() => null);
+    if (!response) {
+      setCreateError(
+        "The brand could not be created. Your receipt edits are unchanged; try again.",
+      );
+      return;
+    }
+    if (response.ok) {
+      const brand = merchantBrandSchema.parse(await response.json());
+      setBrands((current) =>
+        [...current, brand].sort((a, b) => a.name.localeCompare(b.name, "de")),
+      );
+      onChange({ merchantBrandId: brand.id, merchantStoreId: null });
+      setCreating(null);
+      return;
+    }
+    const error = apiErrorSchema.safeParse(await response.json());
+    if (error.success && error.data.error.code === "conflict") {
+      const existingResponse = await fetch(
+        `/api/v1/merchant-brands?query=${encodeURIComponent(name)}&limit=100`,
+      ).catch(() => null);
+      const existing = existingResponse?.ok
+        ? merchantBrandListSchema
+            .parse(await existingResponse.json())
+            .brands.find(
+              (brand) =>
+                normalizeMerchantName(brand.name) ===
+                normalizeMerchantName(name),
+            )
+        : undefined;
+      if (existing) {
+        setBrands((current) =>
+          current.some((brand) => brand.id === existing.id)
+            ? current
+            : [...current, existing],
+        );
+        onChange({ merchantBrandId: existing.id, merchantStoreId: null });
+        setCreateError("That brand already exists; it has been selected.");
+        setCreating(null);
+        return;
+      }
+    }
+    setCreateError(
+      "The brand could not be created. Your receipt edits are unchanged; try again.",
+    );
+  }
+
+  async function createStore() {
+    if (!value.merchantBrandId) return;
+    const body = {
+      brandId: value.merchantBrandId,
+      name: storeDraft.name,
+      street: storeDraft.street || null,
+      postalCode: storeDraft.postalCode || null,
+      city: storeDraft.city || null,
+    };
+    if (!body.name.trim()) return setCreateError("Enter a store name.");
+    setCreateError("");
+    const response = await fetch("/api/v1/merchant-stores", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }).catch(() => null);
+    if (!response) {
+      setCreateError(
+        "The store could not be created. Your receipt edits are unchanged; try again.",
+      );
+      return;
+    }
+    if (response.ok) {
+      const store = merchantStoreSchema.parse(await response.json());
+      setStores((current) =>
+        [...current, store].sort((a, b) => a.name.localeCompare(b.name, "de")),
+      );
+      onChange({ merchantBrandId: store.brandId, merchantStoreId: store.id });
+      setCreating(null);
+      return;
+    }
+    const error = apiErrorSchema.safeParse(await response.json());
+    if (error.success && error.data.error.code === "conflict") {
+      const existingResponse = await fetch(
+        `/api/v1/merchant-stores?brandId=${encodeURIComponent(value.merchantBrandId)}&query=${encodeURIComponent(body.name)}&limit=100`,
+      ).catch(() => null);
+      const existing = existingResponse?.ok
+        ? merchantStoreListSchema
+            .parse(await existingResponse.json())
+            .stores.find(
+              (store) =>
+                normalizeMerchantName(store.name) ===
+                  normalizeMerchantName(body.name) &&
+                store.normalizedAddressKey ===
+                  normalizeMerchantAddressKey(body),
+            )
+        : undefined;
+      if (existing) {
+        setStores((current) =>
+          current.some((store) => store.id === existing.id)
+            ? current
+            : [...current, existing],
+        );
+        onChange({
+          merchantBrandId: existing.brandId,
+          merchantStoreId: existing.id,
+        });
+        setCreateError(
+          "That exact store already exists; it has been selected.",
+        );
+        setCreating(null);
+        return;
+      }
+    }
+    setCreateError(
+      "The store could not be created. Your receipt edits are unchanged; try again.",
+    );
+  }
+
+  return (
+    <fieldset className="merchant-identity field--wide">
+      <legend>
+        Canonical merchant identity <span>optional</span>
+      </legend>
+      <p id="merchant-identity-help">
+        Keep the printed merchant above; optionally group it by brand and store.
+      </p>
+      {loadError && (
+        <div className="inline-error" role="alert">
+          {loadError}{" "}
+          <button
+            type="button"
+            onClick={() =>
+              void (value.merchantBrandId ? loadStores() : loadBrands())
+            }
+          >
+            Try again
+          </button>
+        </div>
+      )}
+      <div className="merchant-selects">
+        <div className="field">
+          <label htmlFor="merchant-brand">Brand</label>
+          <select
+            id="merchant-brand"
+            aria-describedby="merchant-identity-help"
+            value={value.merchantBrandId ?? ""}
+            onFocus={() => void loadBrands()}
+            onChange={(event) => chooseBrand(event.target.value || null)}
+          >
+            <option value="">Unassigned</option>
+            {value.merchantBrandId &&
+              !brands.some((brand) => brand.id === value.merchantBrandId) && (
+                <option value={value.merchantBrandId}>
+                  {selectedBrandName ?? "Assigned brand"}
+                </option>
+              )}
+            {brands.map((brand) => (
+              <option key={brand.id} value={brand.id}>
+                {brand.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="merchant-store">Store</label>
+          <select
+            id="merchant-store"
+            disabled={!value.merchantBrandId}
+            aria-describedby="merchant-identity-help"
+            value={value.merchantStoreId ?? ""}
+            onChange={(event) =>
+              onChange({
+                merchantBrandId: value.merchantBrandId,
+                merchantStoreId: event.target.value || null,
+              })
+            }
+          >
+            <option value="">Unassigned</option>
+            {value.merchantStoreId &&
+              !stores.some((store) => store.id === value.merchantStoreId) && (
+                <option value={value.merchantStoreId}>
+                  {selectedStoreName ?? "Assigned store"}
+                </option>
+              )}
+            {stores.map((store) => (
+              <option key={store.id} value={store.id}>
+                {store.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+      {pendingBrandId !== undefined && (
+        <div
+          className="inline-confirmation"
+          role="alertdialog"
+          aria-labelledby="merchant-change-title"
+        >
+          <strong id="merchant-change-title">Clear the selected store?</strong>
+          <p>
+            Changing or clearing its brand also clears the store assignment.
+          </p>
+          <button
+            type="button"
+            className="button button--small"
+            onClick={() => {
+              onChange({
+                merchantBrandId: pendingBrandId,
+                merchantStoreId: null,
+              });
+              setPendingBrandId(undefined);
+            }}
+          >
+            Continue
+          </button>
+          <button
+            type="button"
+            className="button button--small button--quiet"
+            onClick={() => setPendingBrandId(undefined)}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+      <div className="merchant-create-actions">
+        <button
+          type="button"
+          onClick={() => {
+            setCreating(creating === "brand" ? null : "brand");
+            setCreateError("");
+          }}
+        >
+          + Create brand
+        </button>
+        <button
+          type="button"
+          disabled={!value.merchantBrandId}
+          onClick={() => {
+            setCreating(creating === "store" ? null : "store");
+            setCreateError("");
+          }}
+        >
+          + Create store
+        </button>
+      </div>
+      {creating === "brand" && (
+        <div className="inline-create">
+          <div className="field">
+            <label htmlFor="new-brand-name">Brand name</label>
+            <input
+              id="new-brand-name"
+              value={brandName}
+              onChange={(event) => setBrandName(event.target.value)}
+              autoFocus
+            />
+          </div>
+          <button
+            type="button"
+            className="button button--small"
+            onClick={() => void createBrand()}
+          >
+            Create and select
+          </button>
+        </div>
+      )}
+      {creating === "store" && (
+        <div className="inline-create">
+          <div className="field">
+            <label htmlFor="new-store-name">Store name</label>
+            <input
+              id="new-store-name"
+              value={storeDraft.name}
+              onChange={(event) =>
+                setStoreDraft((draft) => ({
+                  ...draft,
+                  name: event.target.value,
+                }))
+              }
+              autoFocus
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="new-store-street">
+              Street <span>optional</span>
+            </label>
+            <input
+              id="new-store-street"
+              value={storeDraft.street}
+              onChange={(event) =>
+                setStoreDraft((draft) => ({
+                  ...draft,
+                  street: event.target.value,
+                }))
+              }
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="new-store-postal">
+              Postal code <span>optional</span>
+            </label>
+            <input
+              id="new-store-postal"
+              value={storeDraft.postalCode}
+              onChange={(event) =>
+                setStoreDraft((draft) => ({
+                  ...draft,
+                  postalCode: event.target.value,
+                }))
+              }
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="new-store-city">
+              City <span>optional</span>
+            </label>
+            <input
+              id="new-store-city"
+              value={storeDraft.city}
+              onChange={(event) =>
+                setStoreDraft((draft) => ({
+                  ...draft,
+                  city: event.target.value,
+                }))
+              }
+            />
+          </div>
+          <button
+            type="button"
+            className="button button--small"
+            onClick={() => void createStore()}
+          >
+            Create and select
+          </button>
+        </div>
+      )}
+      {createError && (
+        <p className="field-error" role="status">
+          {createError}
+        </p>
+      )}
+    </fieldset>
+  );
+}
+
 function CreateReceipt() {
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [serverError, setServerError] = useState("");
+  const [merchantIdentity, setMerchantIdentity] =
+    useState<MerchantIdentityValue>({
+      merchantBrandId: null,
+      merchantStoreId: null,
+    });
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
@@ -299,6 +731,7 @@ function CreateReceipt() {
     try {
       const body = {
         merchantRaw,
+        ...merchantIdentity,
         purchaseDate,
         purchaseTime: String(data.get("purchaseTime") || "") || null,
         totalCents: total,
@@ -380,6 +813,10 @@ function CreateReceipt() {
             </small>
           )}
         </div>
+        <MerchantIdentity
+          value={merchantIdentity}
+          onChange={setMerchantIdentity}
+        />
         <div className="field">
           <label htmlFor="purchaseDate">Purchase date</label>
           <input
@@ -454,6 +891,10 @@ type EditorItem = {
 };
 type EditorValues = {
   merchantRaw: string;
+  merchantBrandId: string | null;
+  merchantStoreId: string | null;
+  merchantBrandName: string;
+  merchantStoreName: string;
   purchaseDate: string;
   purchaseTime: string;
   total: string;
@@ -464,6 +905,10 @@ type EditorValues = {
 function editorValues(receipt: ReceiptDetail): EditorValues {
   return {
     merchantRaw: receipt.merchantRaw,
+    merchantBrandId: receipt.merchantBrand?.id ?? null,
+    merchantStoreId: receipt.merchantStore?.id ?? null,
+    merchantBrandName: receipt.merchantBrand?.name ?? "",
+    merchantStoreName: receipt.merchantStore?.name ?? "",
     purchaseDate: receipt.purchaseDate,
     purchaseTime: receipt.purchaseTime ?? "",
     total: centsInput(receipt.totalCents),
@@ -478,7 +923,9 @@ function editorValues(receipt: ReceiptDetail): EditorValues {
   };
 }
 
-export function lineTotalSum(values: EditorValues): number | null {
+export function lineTotalSum<T extends Pick<EditorValues, "items">>(
+  values: T,
+): number | null {
   let total = 0;
   for (const item of values.items) {
     const cents = parseMoney(item.lineTotal);
@@ -495,6 +942,10 @@ function ReceiptEditor({ id }: { id: string }) {
   >("loading");
   const empty: EditorValues = {
     merchantRaw: "",
+    merchantBrandId: null,
+    merchantStoreId: null,
+    merchantBrandName: "",
+    merchantStoreName: "",
     purchaseDate: "",
     purchaseTime: "",
     total: "",
@@ -656,6 +1107,8 @@ function ReceiptEditor({ id }: { id: string }) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           merchantRaw: values.merchantRaw,
+          merchantBrandId: values.merchantBrandId,
+          merchantStoreId: values.merchantStoreId,
           purchaseDate: values.purchaseDate,
           purchaseTime: values.purchaseTime || null,
           totalCents: total,
@@ -737,6 +1190,17 @@ function ReceiptEditor({ id }: { id: string }) {
               value={values.merchantRaw}
               error={errors.merchantRaw}
               onChange={(value) => update("merchantRaw", value)}
+            />
+            <MerchantIdentity
+              value={{
+                merchantBrandId: values.merchantBrandId,
+                merchantStoreId: values.merchantStoreId,
+              }}
+              onChange={(identity) =>
+                setValues((current) => ({ ...current, ...identity }))
+              }
+              selectedBrandName={values.merchantBrandName}
+              selectedStoreName={values.merchantStoreName}
             />
             <EditorField
               label="Purchase date"
