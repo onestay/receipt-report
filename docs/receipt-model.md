@@ -71,6 +71,13 @@ merchant grouping is a silent data loss the user cannot see.
 - Media type, byte size, and SHA-256 digest
 - Original filename when available, stored only after sanitization
 
+There is initially one retained original per receipt. Exact digest-and-size
+uniqueness is enforced across the whole store. Attaching a second original is a
+conflict unless the caller uses the explicit replacement operation. Replacement
+promotes the new file and durably repoints metadata before retryable cleanup of
+the old path. Explicit removal durably clears metadata before retryable file
+cleanup; ordinary receipt deletion remains restricted while a document exists.
+
 ## Receipt page
 
 - Receipt document identifier

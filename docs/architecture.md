@@ -56,11 +56,12 @@ planning commit.
 
 Versioned REST resources are flat rather than nested:
 
-| Resource                  | Purpose                                    |
-| ------------------------- | ------------------------------------------ |
-| `/api/v1/receipts`        | Receipt CRUD and list                      |
-| `/api/v1/merchant-brands` | Canonical merchant brand CRUD and list     |
-| `/api/v1/merchant-stores` | Store CRUD and list, filtered by `brandId` |
+| Resource                        | Purpose                                             |
+| ------------------------------- | --------------------------------------------------- |
+| `/api/v1/receipts`              | Receipt CRUD and list                               |
+| `/api/v1/merchant-brands`       | Canonical merchant brand CRUD and list              |
+| `/api/v1/merchant-stores`       | Store CRUD and list, filtered by `brandId`          |
+| `/api/v1/receipts/:id/document` | Original upload, metadata, replacement, and removal |
 
 Both merchant lists accept a trimmed display-name `query`, a `limit`, and a
 `cursor`, and are ordered by normalized name then stable ID so keyset
@@ -68,7 +69,10 @@ pagination is deterministic. Receipt responses embed the linked brand and store
 so a client can render the raw label and its grouping without a request per row.
 
 The public error taxonomy is `validation_error`, `invalid_cursor`, `not_found`,
-`conflict`, and `internal_error`. `conflict` (HTTP 409) covers normalized-name
+`conflict`, document-ingestion errors, and `internal_error`. Document ingestion
+uses stable `document_too_large`, `unsupported_document`, `malformed_document`,
+`multipart_error`, and `duplicate_document` codes. A duplicate conflict includes
+the existing receipt and document IDs. `conflict` (HTTP 409) covers normalized-name
 collisions and referentially blocked deletion. A request naming an unknown or
 mismatched brand/store is a `validation_error`, because the request itself is
 wrong rather than the server state.
@@ -99,6 +103,22 @@ below that root; staging on the same filesystem allows atomic rename when a file
 is promoted. Paths stored in SQLite are generated relative paths and never
 uploaded filenames. A receipt with document metadata is deletion-restricted
 until a later storage-aware removal operation removes its files and metadata.
+Uploads stream into a bounded staging file while computing SHA-256, and actual
+JPEG, PNG, or PDF type and structure are checked without decoding pixels or
+rendering PDF content. Exact `(SHA-256, byte size)` uniqueness is store-wide.
+The initial bounded PDF validator intentionally accepts only PDFs whose page
+objects and classic cross-reference table are visible in the file structure;
+PDFs using compressed object/cross-reference streams are rejected until the
+isolated normalization renderer in the next milestone becomes the definitive
+parser. This conservative compatibility limit avoids decompressing or executing
+PDF content in the API process.
+Replacement promotes a new, separately named original before transactionally
+repointing metadata; the old path is then cleaned through a durable retry record.
+Removal first records cleanup and removes metadata transactionally, then deletes
+bytes. Public document responses omit internal relative storage paths, and
+original bytes are served only by receipt and document ID through the API.
+The API sweeps staging at startup, before listening, so a process crash cannot
+leave temporary uploads indefinitely.
 
 In Compose, `/data/receipt-report.db` and `/data/documents` share the
 `receipt-data` volume and therefore form one backup unit. Stop API and worker

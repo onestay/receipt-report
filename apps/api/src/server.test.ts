@@ -15,8 +15,18 @@ describe("API server lifecycle", () => {
     directory = await mkdtemp(
       join(tmpdir(), `receipt-report-server-${process.pid}-`),
     );
+    const databaseUrl = `file:${join(directory, "server.db")}`;
+    execFileSync(
+      "pnpm",
+      ["--filter", "@receipt-report/database", "db:migrate:deploy"],
+      {
+        cwd: process.cwd(),
+        env: { ...process.env, DATABASE_URL: databaseUrl },
+        stdio: "pipe",
+      },
+    );
     const started = await startServer({
-      DATABASE_URL: `file:${join(directory, "server.db")}`,
+      DATABASE_URL: databaseUrl,
       STORAGE_PATH: join(directory, "storage"),
       HOST: "127.0.0.1",
       PORT: "43127",
@@ -26,3 +36,4 @@ describe("API server lifecycle", () => {
     expect(started.server.listening).toBe(false);
   });
 });
+import { execFileSync } from "node:child_process";

@@ -78,7 +78,7 @@ model ReceiptDocument {
   updatedAt        DateTime      @updatedAt
   pages            ReceiptPage[]
 
-  @@index([sha256, byteSize])
+  @@unique([sha256, byteSize])
 }
 
 model ReceiptPage {
@@ -96,6 +96,17 @@ model ReceiptPage {
   createdAt    DateTime        @default(now())
 
   @@unique([documentId, pageNumber])
+}
+
+/// Durable retry record for filesystem cleanup that could not complete after a
+/// successful metadata transition. Paths remain internal and storage-relative.
+model DocumentFileCleanup {
+  id           String   @id @default(cuid())
+  relativePath String   @unique
+  attempts     Int      @default(0)
+  lastError    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 model LineItem {

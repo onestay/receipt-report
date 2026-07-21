@@ -1,4 +1,5 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { createReadStream, type ReadStream } from "node:fs";
 import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 import type { PrismaClient } from "@prisma/client";
@@ -17,6 +18,16 @@ export function originalDocumentPath(
   if (!/^(jpe?g|png|pdf)$/.test(normalized))
     throw new Error("Unsupported document extension");
   return `originals/${safeSegment(documentId)}/original.${normalized}`;
+}
+
+export function replacementOriginalDocumentPath(
+  documentId: string,
+  extension: string,
+  revision: string = randomUUID(),
+): string {
+  const base = originalDocumentPath(documentId, extension);
+  const dot = base.lastIndexOf(".");
+  return `${base.slice(0, dot)}-${safeSegment(revision)}${base.slice(dot)}`;
 }
 
 export function normalizedPagePath(
@@ -52,6 +63,11 @@ export class FilesystemDocumentStorage {
     await mkdir(this.path("staging"), { recursive: true, mode: 0o700 });
   }
 
+  async cleanupStaging(): Promise<void> {
+    await rm(this.path("staging"), { recursive: true, force: true });
+    await this.initialize();
+  }
+
   async stage(bytes: Uint8Array): Promise<string> {
     await this.initialize();
     const relativePath = `staging/${randomUUID()}.tmp`;
@@ -60,6 +76,40 @@ export class FilesystemDocumentStorage {
       mode: 0o600,
     });
     return relativePath;
+  }
+
+  async stageStream(
+    source: AsyncIterable<Uint8Array>,
+    maxBytes: number,
+    onCleanupFailure?: (relativePath: string) => Promise<void>,
+  ): Promise<{ relativePath: string; byteSize: number; sha256: string }> {
+    await this.initialize();
+    const relativePath = `staging/${randomUUID()}.tmp`;
+    const handle = await open(this.path(relativePath), "wx", 0o600);
+    const hash = createHash("sha256");
+    let byteSize = 0;
+    try {
+      for await (const chunk of source) {
+        byteSize += chunk.byteLength;
+        if (byteSize > maxBytes) throw new DocumentStorageLimitError();
+        hash.update(chunk);
+        await handle.write(chunk);
+      }
+      if (byteSize === 0) throw new EmptyDocumentError();
+      await handle.sync();
+      return { relativePath, byteSize, sha256: hash.digest("hex") };
+    } catch (error) {
+      await handle.close();
+      try {
+        await this.cleanup(relativePath);
+      } catch (cleanupError) {
+        if (!onCleanupFailure) throw cleanupError;
+        await onCleanupFailure(relativePath);
+      }
+      throw error;
+    } finally {
+      await handle.close().catch(() => undefined);
+    }
   }
 
   async promote(
@@ -79,6 +129,39 @@ export class FilesystemDocumentStorage {
     return readFile(this.path(relativePath));
   }
 
+  async readHead(relativePath: string, maxBytes: number): Promise<Buffer> {
+    const handle = await open(this.path(relativePath), "r");
+    try {
+      const buffer = Buffer.alloc(maxBytes);
+      const { bytesRead } = await handle.read(buffer, 0, maxBytes, 0);
+      return buffer.subarray(0, bytesRead);
+    } finally {
+      await handle.close();
+    }
+  }
+
+  async readAt(
+    relativePath: string,
+    position: number,
+    length: number,
+  ): Promise<Buffer> {
+    const handle = await open(this.path(relativePath), "r");
+    try {
+      const buffer = Buffer.alloc(length);
+      const { bytesRead } = await handle.read(buffer, 0, length, position);
+      return buffer.subarray(0, bytesRead);
+    } finally {
+      await handle.close();
+    }
+  }
+
+  createReadStream(
+    relativePath: string,
+    options?: { highWaterMark?: number },
+  ): ReadStream {
+    return createReadStream(this.path(relativePath), options);
+  }
+
   async cleanup(relativePath: string): Promise<void> {
     await rm(this.path(relativePath), { force: true });
   }
@@ -95,6 +178,10 @@ export class FilesystemDocumentStorage {
   }
 }
 
+export class DocumentStorageLimitError extends Error {}
+
+export class EmptyDocumentError extends Error {}
+
 export type PersistOriginalInput = {
   receiptId: string;
   stagedRelativePath: string;
@@ -108,21 +195,29 @@ export async function persistOriginalDocument(
   database: PrismaClient,
   storage: FilesystemDocumentStorage,
   input: PersistOriginalInput,
-  hooks: { afterPromote?: (() => Promise<void>) | undefined } = {},
+  hooks: {
+    afterPromote?: (() => Promise<void>) | undefined;
+    onCleanupFailure?: ((relativePath: string) => Promise<void>) | undefined;
+  } = {},
 ): Promise<{ id: string }> {
-  let promotedPath: string | undefined;
   const extension =
     input.mediaType === "application/pdf"
       ? "pdf"
       : input.mediaType === "image/png"
         ? "png"
         : "jpg";
+  const promotedPath = originalDocumentPath(randomUUID(), extension);
+  await database.documentFileCleanup.create({
+    data: { relativePath: promotedPath },
+  });
   try {
+    await storage.promote(input.stagedRelativePath, promotedPath);
+    await hooks.afterPromote?.();
     return await database.$transaction(async (transaction) => {
       const document = await transaction.receiptDocument.create({
         data: {
           receiptId: input.receiptId,
-          relativePath: `pending/${randomUUID()}`,
+          relativePath: promotedPath,
           originalFilename: input.originalFilename,
           mediaType: input.mediaType,
           byteSize: input.byteSize,
@@ -130,17 +225,21 @@ export async function persistOriginalDocument(
         },
         select: { id: true },
       });
-      promotedPath = originalDocumentPath(document.id, extension);
-      await storage.promote(input.stagedRelativePath, promotedPath);
-      await hooks.afterPromote?.();
-      return transaction.receiptDocument.update({
-        where: { id: document.id },
-        data: { relativePath: promotedPath },
-        select: { id: true },
+      await transaction.documentFileCleanup.delete({
+        where: { relativePath: promotedPath },
       });
+      return document;
     });
   } catch (error) {
-    if (promotedPath) await storage.cleanup(promotedPath);
+    try {
+      await storage.cleanup(promotedPath);
+      await database.documentFileCleanup.deleteMany({
+        where: { relativePath: promotedPath },
+      });
+    } catch (cleanupError) {
+      if (!hooks.onCleanupFailure) throw cleanupError;
+      await hooks.onCleanupFailure(promotedPath);
+    }
     throw error;
   }
 }

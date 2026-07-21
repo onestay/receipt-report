@@ -21,6 +21,8 @@ const sharedSchema = z
     DOCUMENT_MAX_IMAGE_WIDTH: positiveLimit.default(20_000),
     DOCUMENT_MAX_IMAGE_HEIGHT: positiveLimit.default(20_000),
     DOCUMENT_MAX_DECODED_PIXELS: positiveLimit.default(200_000_000),
+    DOCUMENT_MAX_REQUEST_BYTES: positiveLimit.default(26 * 1024 * 1024),
+    DOCUMENT_VALIDATION_TIMEOUT_MS: positiveLimit.default(5_000),
   })
   .superRefine((value, context) => {
     const databasePath = value.DATABASE_URL.slice("file:".length);
@@ -30,6 +32,13 @@ const sharedSchema = z
         path: ["STORAGE_PATH"],
         message:
           "STORAGE_PATH must be a dedicated subdirectory, not the database directory",
+      });
+    }
+    if (value.DOCUMENT_MAX_REQUEST_BYTES <= value.DOCUMENT_MAX_BYTES) {
+      context.addIssue({
+        code: "custom",
+        path: ["DOCUMENT_MAX_REQUEST_BYTES"],
+        message: "DOCUMENT_MAX_REQUEST_BYTES must exceed DOCUMENT_MAX_BYTES",
       });
     }
   });

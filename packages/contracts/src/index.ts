@@ -292,6 +292,11 @@ export const apiErrorCodeSchema = z.enum([
   "invalid_cursor",
   "not_found",
   "conflict",
+  "document_too_large",
+  "unsupported_document",
+  "malformed_document",
+  "duplicate_document",
+  "multipart_error",
   "internal_error",
 ]);
 export const apiErrorSchema = z.object({
@@ -342,6 +347,16 @@ export const receiptDocumentSchema = z.object({
   pages: z.array(receiptPageSchema),
 });
 
+/** Public document metadata deliberately omits the internal storage path. */
+export const receiptDocumentResponseSchema = receiptDocumentSchema
+  .omit({ relativePath: true, pages: true })
+  .extend({ originalUrl: z.string().startsWith("/api/v1/") });
+
+export const duplicateDocumentDetailsSchema = z.object({
+  receiptId: receiptIdSchema,
+  documentId: idSchema,
+});
+
 export type MerchantBrandCreate = z.infer<typeof merchantBrandCreateSchema>;
 export type MerchantBrandUpdate = z.infer<typeof merchantBrandUpdateSchema>;
 export type MerchantBrand = z.infer<typeof merchantBrandSchema>;
@@ -358,6 +373,9 @@ export type LineItemInput = z.infer<typeof lineItemInputSchema>;
 export type LineItem = z.infer<typeof lineItemSchema>;
 export type ReceiptCreate = z.infer<typeof receiptCreateSchema>;
 export type ReceiptUpdate = z.infer<typeof receiptUpdateSchema>;
+export type ReceiptDocumentResponse = z.infer<
+  typeof receiptDocumentResponseSchema
+>;
 export type ReceiptSummary = z.infer<typeof receiptSummarySchema>;
 export type ReceiptDetail = z.infer<typeof receiptDetailSchema>;
 export type ReceiptList = z.infer<typeof receiptListSchema>;

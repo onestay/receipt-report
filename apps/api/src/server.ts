@@ -3,9 +3,11 @@ import { parseApiConfig } from "@receipt-report/config";
 import {
   createDatabase,
   enableWal,
+  FilesystemDocumentStorage,
   reportJournalMode,
 } from "@receipt-report/database";
 import { createApp } from "./app.js";
+import { retryDocumentFileCleanup } from "./documents.js";
 
 export async function startServer(
   environment: NodeJS.ProcessEnv = process.env,
@@ -15,12 +17,16 @@ export async function startServer(
   const database = await createDatabase(config.DATABASE_URL);
   const journalMode = await enableWal(database);
   reportJournalMode(journalMode);
+  const documentStorage = new FilesystemDocumentStorage(config.STORAGE_PATH);
+  await documentStorage.cleanupStaging();
+  await retryDocumentFileCleanup(database, documentStorage);
 
-  const app = createApp(
-    config.WEB_DIST_DIR
-      ? { database, webDistDirectory: config.WEB_DIST_DIR }
-      : { database },
-  );
+  const app = createApp({
+    database,
+    documentStorage,
+    documentConfig: config,
+    ...(config.WEB_DIST_DIR ? { webDistDirectory: config.WEB_DIST_DIR } : {}),
+  });
   const server = app.listen(config.PORT, config.HOST);
   await new Promise<void>((resolveListening, reject) => {
     server.once("listening", resolveListening);
