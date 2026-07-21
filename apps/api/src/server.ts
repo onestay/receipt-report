@@ -5,9 +5,9 @@ import {
   enableWal,
   FilesystemDocumentStorage,
   reportJournalMode,
+  retryDocumentFileCleanup,
 } from "@receipt-report/database";
 import { createApp } from "./app.js";
-import { retryDocumentFileCleanup } from "./documents.js";
 
 export async function startServer(
   environment: NodeJS.ProcessEnv = process.env,

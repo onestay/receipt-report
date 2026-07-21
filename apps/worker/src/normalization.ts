@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { WorkerConfig } from "@receipt-report/config";
 import { NORMALIZATION_PROFILE_VERSION } from "@receipt-report/contracts";
 import {
@@ -15,6 +16,7 @@ type ClaimedJob = {
   id: string;
   documentId: string;
   attempts: number;
+  claimToken: string;
   document: {
     relativePath: string;
     mediaType: string;
@@ -30,29 +32,44 @@ export class NormalizationProcessor {
   ) {}
 
   async resetInterruptedJobs(): Promise<void> {
+    const staleBefore = new Date(
+      Date.now() - this.config.NORMALIZATION_TIMEOUT_MS - 60_000,
+    );
     const interrupted = await this.database.normalizationJob.findMany({
-      where: { status: "running" },
-      select: { id: true, documentId: true },
+      where: {
+        status: "running",
+        OR: [{ claimedAt: null }, { claimedAt: { lte: staleBefore } }],
+      },
+      select: { id: true, documentId: true, claimToken: true },
     });
     if (interrupted.length === 0) return;
     await this.database.$transaction(async (transaction) => {
-      await transaction.normalizationJob.updateMany({
-        where: { id: { in: interrupted.map((job) => job.id) } },
-        data: {
-          status: "pending",
-          claimedAt: null,
-          availableAt: new Date(),
-          lastError: null,
-        },
-      });
-      await transaction.receiptDocument.updateMany({
-        where: { id: { in: interrupted.map((job) => job.documentId) } },
-        data: {
-          normalizationStatus: "pending",
-          normalizationError: null,
-          normalizationStartedAt: null,
-        },
-      });
+      for (const job of interrupted) {
+        const reset = await transaction.normalizationJob.updateMany({
+          where: {
+            id: job.id,
+            status: "running",
+            claimToken: job.claimToken,
+            OR: [{ claimedAt: null }, { claimedAt: { lte: staleBefore } }],
+          },
+          data: {
+            status: "pending",
+            claimedAt: null,
+            claimToken: null,
+            availableAt: new Date(),
+            lastError: null,
+          },
+        });
+        if (reset.count === 1)
+          await transaction.receiptDocument.update({
+            where: { id: job.documentId },
+            data: {
+              normalizationStatus: "pending",
+              normalizationError: null,
+              normalizationStartedAt: null,
+            },
+          });
+      }
     });
   }
 
@@ -66,11 +83,13 @@ export class NormalizationProcessor {
         },
       });
       if (!candidate) return null;
+      const claimToken = randomUUID();
       const claimed = await transaction.normalizationJob.updateMany({
         where: { id: candidate.id, status: "pending" },
         data: {
           status: "running",
           claimedAt: new Date(),
+          claimToken,
           attempts: { increment: 1 },
           lastError: null,
         },
@@ -85,11 +104,16 @@ export class NormalizationProcessor {
           normalizationCompletedAt: null,
         },
       });
-      return { ...candidate, attempts: candidate.attempts + 1 };
+      return {
+        ...candidate,
+        attempts: candidate.attempts + 1,
+        claimToken,
+      };
     });
   }
 
   async processNext(): Promise<boolean> {
+    await this.resetInterruptedJobs();
     const job = await this.claim();
     if (!job) return false;
     try {
@@ -169,7 +193,11 @@ export class NormalizationProcessor {
 
       const oldPaths = await this.database.$transaction(async (transaction) => {
         const active = await transaction.normalizationJob.findFirst({
-          where: { id: job.id, status: "running" },
+          where: {
+            id: job.id,
+            status: "running",
+            claimToken: job.claimToken,
+          },
           select: { id: true },
         });
         if (!active) throw new Error("normalization_claim_lost");
@@ -211,10 +239,20 @@ export class NormalizationProcessor {
             normalizationCompletedAt: new Date(),
           },
         });
-        await transaction.normalizationJob.update({
-          where: { id: job.id },
-          data: { status: "complete", claimedAt: null, lastError: null },
+        const completed = await transaction.normalizationJob.updateMany({
+          where: {
+            id: job.id,
+            status: "running",
+            claimToken: job.claimToken,
+          },
+          data: {
+            status: "complete",
+            claimedAt: null,
+            claimToken: null,
+            lastError: null,
+          },
         });
+        if (completed.count !== 1) throw new Error("normalization_claim_lost");
         await transaction.documentFileCleanup.deleteMany({
           where: { relativePath: { in: targets } },
         });
@@ -232,8 +270,17 @@ export class NormalizationProcessor {
   private async fail(job: ClaimedJob, code: string): Promise<void> {
     await this.database.$transaction(async (transaction) => {
       const failed = await transaction.normalizationJob.updateMany({
-        where: { id: job.id, status: "running" },
-        data: { status: "failed", claimedAt: null, lastError: code },
+        where: {
+          id: job.id,
+          status: "running",
+          claimToken: job.claimToken,
+        },
+        data: {
+          status: "failed",
+          claimedAt: null,
+          claimToken: null,
+          lastError: code,
+        },
       });
       if (failed.count !== 1) return;
       await transaction.receiptDocument.update({

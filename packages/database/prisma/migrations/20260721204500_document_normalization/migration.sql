@@ -17,6 +17,7 @@ CREATE TABLE "NormalizationJob" (
   "attempts" INTEGER NOT NULL DEFAULT 0,
   "availableAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "claimedAt" DATETIME,
+  "claimToken" TEXT,
   "lastError" TEXT,
   "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updatedAt" DATETIME NOT NULL,

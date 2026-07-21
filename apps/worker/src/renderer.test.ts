@@ -61,7 +61,7 @@ describe("local renderer", () => {
       calls.push([command, ...args]);
       if (command === "pdfinfo")
         return {
-          stdout: Buffer.from("Pages:          2\n"),
+          stdout: Buffer.from("Encrypted: no\r\nPages:          2\r\n"),
           stderr: Buffer.alloc(0),
         };
       if (args.includes("-v"))
@@ -141,6 +141,48 @@ describe("local renderer", () => {
         mediaType: "application/pdf",
       }),
     ).rejects.toMatchObject({ code: "pdf_page_invalid" });
+  });
+
+  it("rejects encrypted PDFs before rendering a page", async () => {
+    const path = await storage.stage(Buffer.from("encrypted pdf"));
+    const run = vi.fn(async () => ({
+      stdout: Buffer.from("Encrypted: yes\nPages: 1\n"),
+      stderr: Buffer.alloc(0),
+    }));
+    await expect(
+      new LocalDocumentRenderer(storage, config, run).render({
+        relativePath: path,
+        mediaType: "application/pdf",
+      }),
+    ).rejects.toMatchObject({ code: "encrypted_pdf" });
+    expect(run).toHaveBeenCalledOnce();
+  });
+
+  it("enforces one wall-clock budget across a PDF job", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    try {
+      const path = await storage.stage(Buffer.from("slow pdf"));
+      const run = vi.fn(async (command: string) => {
+        if (command === "pdfinfo") {
+          vi.setSystemTime(config.NORMALIZATION_TIMEOUT_MS + 1);
+          return {
+            stdout: Buffer.from("Encrypted: no\nPages: 1\n"),
+            stderr: Buffer.alloc(0),
+          };
+        }
+        throw new Error("page renderer must not run");
+      });
+      await expect(
+        new LocalDocumentRenderer(storage, config, run).render({
+          relativePath: path,
+          mediaType: "application/pdf",
+        }),
+      ).rejects.toMatchObject({ code: "renderer_timeout" });
+      expect(run).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("rejects unsupported, over-page, and cumulative-pixel inputs", async () => {

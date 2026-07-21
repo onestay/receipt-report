@@ -30,8 +30,10 @@ libvips, and (for PDFs) Poppler versions are persisted.
 
 PDFs are inspected with `pdfinfo` and rendered one page at a time with
 `pdftoppm`. Each subprocess runs through `prlimit` with CPU and address-space
-limits plus a Node wall timeout and output-buffer ceiling. Page count, per-page
-decoded pixels, and cumulative decoded pixels are independently bounded. No
+limits plus a Node wall timeout, hard-kill signal, and pixel-derived output-buffer
+ceiling. One deadline covers the complete PDF rather than restarting for every
+page. Page count, per-page decoded pixels, and cumulative decoded pixels are
+independently bounded, and encrypted PDFs are rejected before rendering. No
 script engine or external resource loader is invoked, and the Compose worker has
 networking disabled.
 
@@ -43,10 +45,11 @@ revisions may advance on image rebuild without silently masquerading as the same
 renderer.
 
 Page files are staged and promoted under revisioned paths. A conditional
-database claim permits one publisher, and one transaction replaces the full
-ordered page row set and marks the job complete. Durable cleanup intents cover
-crashes around file promotion. Failure leaves the retained original and any last
-complete page set unchanged.
+database claim with a unique generation token permits one publisher, and one
+transaction replaces the full ordered page row set and marks the job complete.
+Only expired claims are reclaimed. Durable cleanup intents cover crashes around
+file promotion and are drained when either API or worker starts. Failure leaves
+the retained original and any last complete page set unchanged.
 
 ## Consequences
 

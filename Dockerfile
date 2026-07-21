@@ -2,6 +2,7 @@ FROM node:24.18.0-bookworm-slim AS build-base
 WORKDIR /app
 RUN apt-get update && apt-get install --yes --no-install-recommends ca-certificates openssl && rm -rf /var/lib/apt/lists/*
 RUN corepack enable && corepack prepare pnpm@11.14.0 --activate
+RUN mkdir /data && chown node:node /data
 
 FROM build-base AS api-build
 COPY . .
@@ -28,6 +29,7 @@ RUN corepack enable && corepack prepare pnpm@11.14.0 --activate
 
 FROM runtime-base AS api-runtime
 COPY --from=api-build /app /app
+USER node
 EXPOSE 3000
 CMD ["node", "apps/api/dist/index.js"]
 
@@ -36,4 +38,5 @@ RUN apt-get update \
     && apt-get install --yes --no-install-recommends poppler-utils util-linux \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=worker-build /app /app
+USER node
 CMD ["node", "apps/worker/dist/index.js"]

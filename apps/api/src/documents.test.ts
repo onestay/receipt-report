@@ -417,6 +417,47 @@ describe("receipt document API", () => {
     ).resolves.toMatchObject({ status: "pending" });
   });
 
+  it("rejects retry while normalization is pending or running", async () => {
+    const receiptId = await receipt();
+    const uploaded = await request(app())
+      .post(`/api/v1/receipts/${receiptId}/document`)
+      .attach("document", png, "queued.png")
+      .expect(201);
+    await request(app())
+      .post(`/api/v1/receipts/${receiptId}/document/normalization`)
+      .expect(409, {
+        error: {
+          code: "conflict",
+          message: "Document normalization is already queued",
+        },
+      });
+    await database.$transaction([
+      database.normalizationJob.update({
+        where: { documentId: uploaded.body.id },
+        data: {
+          status: "running",
+          claimedAt: new Date(),
+          claimToken: "active-claim",
+        },
+      }),
+      database.receiptDocument.update({
+        where: { id: uploaded.body.id },
+        data: { normalizationStatus: "running" },
+      }),
+    ]);
+    await request(app())
+      .post(`/api/v1/receipts/${receiptId}/document/normalization`)
+      .expect(409);
+    await expect(
+      database.normalizationJob.findUniqueOrThrow({
+        where: { documentId: uploaded.body.id },
+      }),
+    ).resolves.toMatchObject({
+      status: "running",
+      claimToken: "active-claim",
+    });
+  });
+
   it("rejects missing, malformed multipart, and mismatched IDs safely", async () => {
     const receiptId = await receipt();
     await request(app())

@@ -117,6 +117,7 @@ model NormalizationJob {
   attempts       Int             @default(0)
   availableAt    DateTime        @default(now())
   claimedAt      DateTime?
+  claimToken     String?
   lastError      String?
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt

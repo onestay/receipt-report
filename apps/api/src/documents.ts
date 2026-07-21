@@ -9,6 +9,7 @@ import {
   type FilesystemDocumentStorage,
   persistOriginalDocument,
   replacementOriginalDocumentPath,
+  retryDocumentFileCleanup,
 } from "@receipt-report/database";
 import {
   DocumentValidationTimeoutError,
@@ -99,26 +100,7 @@ function publicDocument(document: StoredDocument): ReceiptDocumentResponse {
   });
 }
 
-export async function retryDocumentFileCleanup(
-  database: Database,
-  storage: FilesystemDocumentStorage,
-): Promise<void> {
-  const pending = await database.documentFileCleanup.findMany({
-    orderBy: { createdAt: "asc" },
-    take: 100,
-  });
-  for (const cleanup of pending) {
-    try {
-      await storage.cleanup(cleanup.relativePath);
-      await database.documentFileCleanup.delete({ where: { id: cleanup.id } });
-    } catch {
-      await database.documentFileCleanup.update({
-        where: { id: cleanup.id },
-        data: { attempts: { increment: 1 }, lastError: "cleanup_failed" },
-      });
-    }
-  }
-}
+export { retryDocumentFileCleanup };
 
 export class DocumentRepository {
   constructor(
@@ -405,22 +387,25 @@ export class DocumentRepository {
     const document = await this.stored(receiptId);
     if (!document) throw new NotFoundError("Receipt document not found");
     await this.database.$transaction(async (transaction) => {
-      await transaction.normalizationJob.upsert({
-        where: { documentId: document.id },
-        create: {
+      const resetJob = await transaction.normalizationJob.updateMany({
+        where: {
           documentId: document.id,
-          profileVersion: NORMALIZATION_PROFILE_VERSION,
+          status: { in: ["failed", "complete"] },
         },
-        update: {
+        data: {
           status: "pending",
           profileVersion: NORMALIZATION_PROFILE_VERSION,
           availableAt: new Date(),
           claimedAt: null,
+          claimToken: null,
           lastError: null,
         },
       });
-      await transaction.receiptDocument.update({
-        where: { id: document.id },
+      const resetDocument = await transaction.receiptDocument.updateMany({
+        where: {
+          id: document.id,
+          normalizationStatus: { in: ["failed", "complete"] },
+        },
         data: {
           normalizationStatus: "pending",
           normalizationError: null,
@@ -429,6 +414,8 @@ export class DocumentRepository {
           normalizationCompletedAt: null,
         },
       });
+      if (resetJob.count !== 1 || resetDocument.count !== 1)
+        throw new ConflictError("Document normalization is already queued");
     });
     return this.get(receiptId);
   }

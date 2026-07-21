@@ -94,6 +94,7 @@ async function retry(documentId: string) {
         status: "pending",
         availableAt: new Date(),
         claimedAt: null,
+        claimToken: null,
       },
     }),
     database.receiptDocument.update({
@@ -306,7 +307,13 @@ describe("normalization processor", () => {
     const { document } = await seed();
     await database.normalizationJob.update({
       where: { documentId: document.id },
-      data: { status: "running", claimedAt: new Date() },
+      data: {
+        status: "running",
+        claimedAt: new Date(
+          Date.now() - config.NORMALIZATION_TIMEOUT_MS - 61_000,
+        ),
+        claimToken: "stale-claim",
+      },
     });
     await database.receiptDocument.update({
       where: { id: document.id },
@@ -326,6 +333,7 @@ describe("normalization processor", () => {
     ).toMatchObject({
       status: "pending",
       claimedAt: null,
+      claimToken: null,
     });
     expect(
       await database.receiptDocument.findUniqueOrThrow({
@@ -334,6 +342,37 @@ describe("normalization processor", () => {
     ).toMatchObject({
       normalizationStatus: "pending",
       normalizationStartedAt: null,
+    });
+  });
+
+  it("does not reset another worker's live claim", async () => {
+    const { document } = await seed();
+    await database.normalizationJob.update({
+      where: { documentId: document.id },
+      data: {
+        status: "running",
+        claimedAt: new Date(),
+        claimToken: "live-claim",
+      },
+    });
+    await database.receiptDocument.update({
+      where: { id: document.id },
+      data: { normalizationStatus: "running" },
+    });
+    const processor = new NormalizationProcessor(
+      database,
+      storage,
+      { render: async () => Promise.reject(new Error("not called")) },
+      config,
+    );
+    await processor.resetInterruptedJobs();
+    expect(
+      await database.normalizationJob.findUniqueOrThrow({
+        where: { documentId: document.id },
+      }),
+    ).toMatchObject({
+      status: "running",
+      claimToken: "live-claim",
     });
   });
 });

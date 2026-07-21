@@ -65,7 +65,8 @@ Versioned REST resources are flat rather than nested:
 
 Document responses also expose normalization status and the complete ordered
 page set. `POST /api/v1/receipts/:id/document/normalization` explicitly retries
-a failed or completed normalization, while page bytes are served by scoped
+a failed or completed normalization and rejects already queued/running work,
+while page bytes are served by scoped
 receipt, document, and page IDs.
 
 Both merchant lists accept a trimmed display-name `query`, a `limit`, and a
@@ -127,11 +128,14 @@ leave temporary uploads indefinitely.
 
 Each accepted original receives one single-purpose normalization job in the same
 database transaction as its document row. The worker claims a pending job with a
-conditional write, renders into worker staging, promotes revisioned page files,
-then publishes all page rows and the complete status in one SQLite transaction.
+conditional write and unique claim token, renders into worker staging, promotes
+revisioned page files, then publishes all page rows and the complete status in
+one SQLite transaction. Live claims are not reset by another worker; only claims
+older than the bounded render budget plus publication grace are reclaimed.
 Cleanup intents make promoted-but-unpublished files and replaced page revisions
-recoverable after a crash. A failed retry cannot remove the last complete page
-set. Profile and renderer versions are recorded on the document and every page.
+recoverable after a crash, and both API and worker startup drain those intents.
+A failed retry cannot remove the last complete page set. Profile and renderer
+versions are recorded on the document and every page.
 
 In Compose, `/data/receipt-report.db` and `/data/documents` share the
 `receipt-data` volume and therefore form one backup unit. Stop API and worker

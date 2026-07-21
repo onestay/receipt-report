@@ -6,6 +6,7 @@ import {
   enableWal,
   FilesystemDocumentStorage,
   reportJournalMode,
+  retryDocumentFileCleanup,
 } from "@receipt-report/database";
 import { NormalizationProcessor } from "./normalization.js";
 import { LocalDocumentRenderer, type DocumentRenderer } from "./renderer.js";
@@ -22,6 +23,7 @@ export async function startWorker(
   reportJournalMode(journalMode);
   const storage = new FilesystemDocumentStorage(config.STORAGE_PATH);
   await storage.cleanupStaging("worker");
+  await retryDocumentFileCleanup(database, storage);
   const renderer =
     injectedRenderer ?? new LocalDocumentRenderer(storage, config);
   if (config.NORMALIZATION_VERIFY_RENDERER) await renderer.verify?.();

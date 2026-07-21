@@ -2,7 +2,11 @@ import { access, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createDatabase } from "@receipt-report/database";
+import {
+  createDatabase,
+  FilesystemDocumentStorage,
+  normalizedPageRevisionPath,
+} from "@receipt-report/database";
 import { startWorker } from "./worker.js";
 
 let directory: string | undefined;
@@ -45,6 +49,18 @@ describe("worker lifecycle", () => {
         normalizationJob: { create: { profileVersion: "receipt-page-v1" } },
       },
     });
+    const storagePath = join(directory, "storage");
+    const seedStorage = new FilesystemDocumentStorage(storagePath);
+    const orphanedPath = normalizedPageRevisionPath(
+      document.id,
+      "crashed-attempt",
+      1,
+    );
+    const stagedOrphan = await seedStorage.stage(Buffer.from([9]), "worker");
+    await seedStorage.promote(stagedOrphan, orphanedPath);
+    await seedDatabase.documentFileCleanup.create({
+      data: { relativePath: orphanedPath },
+    });
     await seedDatabase.$disconnect();
     const render = vi.fn(async () => ({
       pages: [
@@ -61,7 +77,7 @@ describe("worker lifecycle", () => {
     const worker = await startWorker(
       {
         DATABASE_URL: databaseUrl,
-        STORAGE_PATH: join(directory, "storage"),
+        STORAGE_PATH: storagePath,
         WORKER_READY_FILE: readyFile,
         NORMALIZATION_VERIFY_RENDERER: "false",
         NORMALIZATION_POLL_MS: "1",
@@ -69,6 +85,8 @@ describe("worker lifecycle", () => {
       { render },
     );
     expect(await readFile(readyFile, "utf8")).toMatch(/^\d+\n$/);
+    expect(await seedStorage.exists(orphanedPath)).toBe(false);
+    expect(await worker.database.documentFileCleanup.count()).toBe(0);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       const normalized =
         await worker.database.receiptDocument.findUniqueOrThrow({

@@ -49,6 +49,7 @@ export async function runLimitedCommand(
       {
         encoding: "buffer",
         timeout: options.timeoutMs,
+        killSignal: "SIGKILL",
         maxBuffer: options.maxBuffer,
         env: { PATH: process.env.PATH ?? "/usr/bin:/bin", LANG: "C" },
       },
@@ -78,20 +79,25 @@ export class LocalDocumentRenderer implements DocumentRenderer {
     private readonly runCommand: CommandRunner = runLimitedCommand,
   ) {}
 
-  private commandOptions(maxBuffer = 1024 * 1024) {
+  private commandOptions(
+    maxBuffer = 1024 * 1024,
+    timeoutMs = this.config.NORMALIZATION_TIMEOUT_MS,
+  ) {
     return {
-      timeoutMs: this.config.NORMALIZATION_TIMEOUT_MS,
+      timeoutMs,
       memoryMb: this.config.NORMALIZATION_MEMORY_MB,
       maxBuffer,
     };
   }
 
-  private async popplerVersion(): Promise<string> {
+  private async popplerVersion(
+    timeoutMs = this.config.NORMALIZATION_TIMEOUT_MS,
+  ): Promise<string> {
     if (this.popplerIdentity) return this.popplerIdentity;
     const result = await this.runCommand(
       "pdftoppm",
       ["-v"],
-      this.commandOptions(),
+      this.commandOptions(1024 * 1024, timeoutMs),
     );
     const output = `${result.stdout.toString()} ${result.stderr.toString()}`;
     const match = output.match(/pdftoppm version\s+([^\s]+)/i);
@@ -127,13 +133,22 @@ export class LocalDocumentRenderer implements DocumentRenderer {
   }
 
   private async renderPdf(relativePath: string): Promise<RenderedDocument> {
+    const deadline = Date.now() + this.config.NORMALIZATION_TIMEOUT_MS;
+    const remaining = () => {
+      const milliseconds = deadline - Date.now();
+      if (milliseconds <= 0) throw new RendererFailure("renderer_timeout");
+      return milliseconds;
+    };
     const absolutePath = this.storage.absolutePath(relativePath);
     const info = await this.runCommand(
       "pdfinfo",
       [absolutePath],
-      this.commandOptions(),
+      this.commandOptions(1024 * 1024, remaining()),
     );
-    const pageMatch = info.stdout.toString("utf8").match(/^Pages:\s+(\d+)$/m);
+    const details = info.stdout.toString("utf8");
+    if (/^Encrypted:\s+yes\r?$/im.test(details))
+      throw new RendererFailure("encrypted_pdf");
+    const pageMatch = details.match(/^Pages:\s+(\d+)\r?$/m);
     const pageCount = Number(pageMatch?.[1]);
     if (
       !Number.isInteger(pageCount) ||
@@ -158,7 +173,13 @@ export class LocalDocumentRenderer implements DocumentRenderer {
           "-png",
           absolutePath,
         ],
-        this.commandOptions(32 * 1024 * 1024),
+        this.commandOptions(
+          Math.max(
+            1024 * 1024,
+            this.config.NORMALIZATION_MAX_PAGE_PIXELS * 4 + 1024 * 1024,
+          ),
+          remaining(),
+        ),
       );
       const page = await normalizeRasterBytes(
         rendered.stdout,
@@ -174,7 +195,7 @@ export class LocalDocumentRenderer implements DocumentRenderer {
     }
     return {
       pages,
-      renderer: `${await this.popplerVersion()}+${sharpRendererIdentity()}`,
+      renderer: `${await this.popplerVersion(remaining())}+${sharpRendererIdentity()}`,
     };
   }
 }

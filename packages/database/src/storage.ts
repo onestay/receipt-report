@@ -202,6 +202,27 @@ export class FilesystemDocumentStorage {
   }
 }
 
+export async function retryDocumentFileCleanup(
+  database: PrismaClient,
+  storage: FilesystemDocumentStorage,
+): Promise<void> {
+  const pending = await database.documentFileCleanup.findMany({
+    orderBy: { createdAt: "asc" },
+    take: 100,
+  });
+  for (const cleanup of pending) {
+    try {
+      await storage.cleanup(cleanup.relativePath);
+      await database.documentFileCleanup.delete({ where: { id: cleanup.id } });
+    } catch {
+      await database.documentFileCleanup.update({
+        where: { id: cleanup.id },
+        data: { attempts: { increment: 1 }, lastError: "cleanup_failed" },
+      });
+    }
+  }
+}
+
 export class DocumentStorageLimitError extends Error {}
 
 export class EmptyDocumentError extends Error {}

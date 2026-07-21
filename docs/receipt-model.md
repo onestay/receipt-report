@@ -93,10 +93,12 @@ pages. The original file is retained while page images provide a consistent
 input for review and AI providers.
 
 Normalization jobs are intentionally single-purpose. There is at most one per
-document, and a conditional pending-to-running claim prevents concurrent workers
-from publishing competing page sets. Files are revisioned while one database
-transaction replaces the ordered page rows, so partial sets are never public.
-The original always remains retained when normalization fails.
+document, and a conditional pending-to-running claim with a unique generation
+token prevents concurrent or stale workers from publishing competing page sets.
+Only stale claims beyond the render deadline and publication grace are reclaimed.
+Files are revisioned while one database transaction replaces the ordered page
+rows, so partial sets are never public. The original always remains retained
+when normalization fails.
 
 ## Line item
 
