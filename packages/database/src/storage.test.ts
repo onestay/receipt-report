@@ -1,0 +1,180 @@
+import { execFileSync } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createDatabase, type Database } from "./index.js";
+import {
+  FilesystemDocumentStorage,
+  normalizedPagePath,
+  originalDocumentPath,
+  persistOriginalDocument,
+} from "./storage.js";
+
+let directory = "";
+let database: Database | undefined;
+let storage: FilesystemDocumentStorage;
+
+function db(): Database {
+  if (!database) throw new Error("Test database is not initialized");
+  return database;
+}
+
+beforeEach(async () => {
+  directory = await mkdtemp(join(tmpdir(), "receipt-storage-"));
+  const databaseUrl = `file:${join(directory, "test.db")}`;
+  execFileSync(
+    "pnpm",
+    ["--filter", "@receipt-report/database", "db:migrate:deploy"],
+    {
+      cwd: process.cwd(),
+      env: { ...process.env, DATABASE_URL: databaseUrl },
+      stdio: "pipe",
+    },
+  );
+  database = await createDatabase(databaseUrl);
+  storage = new FilesystemDocumentStorage(join(directory, "documents"));
+});
+
+afterEach(async () => {
+  await database?.$disconnect();
+  await rm(directory, { recursive: true, force: true });
+});
+
+describe("filesystem document storage", () => {
+  it("stages, atomically promotes, reads, and repeatedly cleans a file", async () => {
+    const staged = await storage.stage(new TextEncoder().encode("synthetic"));
+    const target = originalDocumentPath("doc_123", ".pdf");
+    await storage.promote(staged, target);
+    expect((await storage.read(target)).toString()).toBe("synthetic");
+    expect(await storage.exists(staged)).toBe(false);
+    await storage.cleanup(target);
+    await storage.cleanup(target);
+    expect(await storage.exists(target)).toBe(false);
+  });
+
+  it("confines generated and caller-provided paths", async () => {
+    expect(originalDocumentPath("doc_123", "jpg")).toBe(
+      "originals/doc_123/original.jpg",
+    );
+    expect(normalizedPagePath("doc_123", 2)).toBe(
+      "pages/doc_123/page-0002.png",
+    );
+    expect(() => originalDocumentPath("../escape", "pdf")).toThrow();
+    expect(() => normalizedPagePath("doc", 0)).toThrow();
+    await expect(storage.read("../escape")).rejects.toThrow("escapes root");
+    await expect(storage.promote("originals/x", "safe.pdf")).rejects.toThrow(
+      "staged",
+    );
+  });
+
+  it("refuses to overwrite an existing durable target", async () => {
+    const target = originalDocumentPath("doc_collision", "png");
+    const first = await storage.stage(new Uint8Array([1]));
+    const second = await storage.stage(new Uint8Array([2]));
+    await storage.promote(first, target);
+    await expect(storage.promote(second, target)).rejects.toThrow(
+      "already exists",
+    );
+    expect([...(await storage.read(target))]).toEqual([1]);
+  });
+});
+
+describe("document persistence coordinator", () => {
+  it("publishes a file and metadata together", async () => {
+    const receipt = await db().receipt.create({
+      data: {
+        merchantRaw: "Synthetic",
+        purchaseDate: "2026-07-21",
+        totalCents: 1,
+      },
+    });
+    const staged = await storage.stage(new Uint8Array([1, 2, 3]));
+    const document = await persistOriginalDocument(db(), storage, {
+      receiptId: receipt.id,
+      stagedRelativePath: staged,
+      originalFilename: "synthetic.png",
+      mediaType: "image/png",
+      byteSize: 3,
+      sha256: "a".repeat(64),
+    });
+    const target = originalDocumentPath(document.id, "png");
+    expect(await storage.exists(target)).toBe(true);
+    expect(
+      await db().receiptDocument.findUnique({
+        where: { id: document.id },
+      }),
+    ).toMatchObject({ receiptId: receipt.id, relativePath: target });
+    await expect(
+      db().receipt.delete({ where: { id: receipt.id } }),
+    ).rejects.toThrow();
+  });
+
+  it("removes a promoted file when metadata persistence fails", async () => {
+    const staged = await storage.stage(new Uint8Array([1]));
+    const receipt = await db().receipt.create({
+      data: {
+        merchantRaw: "Synthetic",
+        purchaseDate: "2026-07-21",
+        totalCents: 1,
+      },
+    });
+    await expect(
+      persistOriginalDocument(
+        db(),
+        storage,
+        {
+          receiptId: receipt.id,
+          stagedRelativePath: staged,
+          originalFilename: null,
+          mediaType: "application/pdf",
+          byteSize: 1,
+          sha256: "b".repeat(64),
+        },
+        { afterPromote: async () => Promise.reject(new Error("injected")) },
+      ),
+    ).rejects.toThrow();
+    expect(
+      await db().receiptDocument.findUnique({
+        where: { receiptId: receipt.id },
+      }),
+    ).toBeNull();
+    expect(await storage.exists(staged)).toBe(false);
+  });
+
+  it("enforces ordered page uniqueness", async () => {
+    const receipt = await db().receipt.create({
+      data: {
+        merchantRaw: "Synthetic",
+        purchaseDate: "2026-07-21",
+        totalCents: 1,
+      },
+    });
+    const document = await db().receiptDocument.create({
+      data: {
+        receiptId: receipt.id,
+        relativePath: "originals/x/original.pdf",
+        mediaType: "application/pdf",
+        byteSize: 1,
+        sha256: "c".repeat(64),
+      },
+    });
+    const page = {
+      documentId: document.id,
+      pageNumber: 1,
+      totalPages: 1,
+      relativePath: "pages/x/page-0001.png",
+      mediaType: "image/png",
+      byteSize: 1,
+      width: 1,
+      height: 1,
+      sha256: "d".repeat(64),
+    };
+    await db().receiptPage.create({ data: page });
+    await expect(
+      db().receiptPage.create({
+        data: { ...page, relativePath: "pages/x/duplicate.png" },
+      }),
+    ).rejects.toThrow();
+  });
+});

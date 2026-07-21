@@ -1,9 +1,38 @@
 import { z } from "zod";
+import { dirname, isAbsolute, parse, resolve } from "node:path";
 
-const sharedSchema = z.object({
-  DATABASE_URL: z.string().startsWith("file:"),
-  STORAGE_PATH: z.string().min(1),
+const safeStoragePath = z.string().superRefine((value, context) => {
+  if (!isAbsolute(value) || resolve(value) === parse(resolve(value)).root) {
+    context.addIssue({
+      code: "custom",
+      message: "STORAGE_PATH must be an absolute non-root directory",
+    });
+  }
 });
+
+const positiveLimit = z.coerce.number().int().positive();
+
+const sharedSchema = z
+  .object({
+    DATABASE_URL: z.string().startsWith("file:"),
+    STORAGE_PATH: safeStoragePath,
+    DOCUMENT_MAX_BYTES: positiveLimit.default(25 * 1024 * 1024),
+    DOCUMENT_MAX_PDF_PAGES: positiveLimit.default(100),
+    DOCUMENT_MAX_IMAGE_WIDTH: positiveLimit.default(20_000),
+    DOCUMENT_MAX_IMAGE_HEIGHT: positiveLimit.default(20_000),
+    DOCUMENT_MAX_DECODED_PIXELS: positiveLimit.default(200_000_000),
+  })
+  .superRefine((value, context) => {
+    const databasePath = value.DATABASE_URL.slice("file:".length);
+    if (resolve(value.STORAGE_PATH) === dirname(resolve(databasePath))) {
+      context.addIssue({
+        code: "custom",
+        path: ["STORAGE_PATH"],
+        message:
+          "STORAGE_PATH must be a dedicated subdirectory, not the database directory",
+      });
+    }
+  });
 
 const apiSchema = sharedSchema.extend({
   HOST: z.string().min(1).default("127.0.0.1"),

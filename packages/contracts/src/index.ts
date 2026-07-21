@@ -302,6 +302,46 @@ export const apiErrorSchema = z.object({
   }),
 });
 
+export const receiptDocumentMediaTypeSchema = z.enum([
+  "image/jpeg",
+  "image/png",
+  "application/pdf",
+]);
+export const receiptPageMediaTypeSchema = z.enum(["image/jpeg", "image/png"]);
+const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
+const relativeStoragePathSchema = z
+  .string()
+  .min(1)
+  .refine(
+    (value) => !value.startsWith("/") && !value.split("/").includes(".."),
+    "Storage path must be relative and confined",
+  );
+export const receiptPageSchema = z.object({
+  id: idSchema,
+  documentId: idSchema,
+  pageNumber: z.number().int().positive(),
+  totalPages: z.number().int().positive(),
+  relativePath: relativeStoragePathSchema,
+  mediaType: receiptPageMediaTypeSchema,
+  byteSize: z.number().int().safe().positive(),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  sha256: sha256Schema,
+  createdAt: z.string().datetime(),
+});
+export const receiptDocumentSchema = z.object({
+  id: idSchema,
+  receiptId: receiptIdSchema,
+  relativePath: relativeStoragePathSchema,
+  originalFilename: z.string().min(1).nullable(),
+  mediaType: receiptDocumentMediaTypeSchema,
+  byteSize: z.number().int().safe().positive(),
+  sha256: sha256Schema,
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+  pages: z.array(receiptPageSchema),
+});
+
 export type MerchantBrandCreate = z.infer<typeof merchantBrandCreateSchema>;
 export type MerchantBrandUpdate = z.infer<typeof merchantBrandUpdateSchema>;
 export type MerchantBrand = z.infer<typeof merchantBrandSchema>;
@@ -322,3 +362,5 @@ export type ReceiptSummary = z.infer<typeof receiptSummarySchema>;
 export type ReceiptDetail = z.infer<typeof receiptDetailSchema>;
 export type ReceiptList = z.infer<typeof receiptListSchema>;
 export type ApiError = z.infer<typeof apiErrorSchema>;
+export type ReceiptDocument = z.infer<typeof receiptDocumentSchema>;
+export type ReceiptPage = z.infer<typeof receiptPageSchema>;
