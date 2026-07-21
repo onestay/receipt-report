@@ -312,6 +312,10 @@ export const receiptDocumentMediaTypeSchema = z.enum([
   "image/png",
   "application/pdf",
 ]);
+export const documentUploadConfigurationSchema = z.object({
+  maxBytes: z.number().int().safe().positive(),
+  acceptedMediaTypes: z.array(receiptDocumentMediaTypeSchema).length(3),
+});
 export const receiptPageMediaTypeSchema = z.enum(["image/jpeg", "image/png"]);
 export const normalizationStatusSchema = z.enum([
   "pending",
@@ -398,6 +402,9 @@ export type ReceiptCreate = z.infer<typeof receiptCreateSchema>;
 export type ReceiptUpdate = z.infer<typeof receiptUpdateSchema>;
 export type ReceiptDocumentResponse = z.infer<
   typeof receiptDocumentResponseSchema
+>;
+export type DocumentUploadConfiguration = z.infer<
+  typeof documentUploadConfigurationSchema
 >;
 export type ReceiptPageResponse = z.infer<typeof receiptPageResponseSchema>;
 export type ReceiptSummary = z.infer<typeof receiptSummarySchema>;

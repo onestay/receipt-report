@@ -85,6 +85,15 @@ function app(config = documentConfig) {
 }
 
 describe("receipt document API", () => {
+  it("publishes the configured upload guidance", async () => {
+    await request(app())
+      .get("/api/v1/document-upload-configuration")
+      .expect(200, {
+        maxBytes: documentConfig.DOCUMENT_MAX_BYTES,
+        acceptedMediaTypes: ["image/jpeg", "image/png", "application/pdf"],
+      });
+  });
+
   it.each([
     ["image.png", "application/octet-stream", png, "image/png"],
     ["image.jpg", "text/plain", jpeg, "image/jpeg"],
