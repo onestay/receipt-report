@@ -71,3 +71,48 @@ test("mobile editor has no horizontal overflow", async ({ page, request }) => {
     ),
   ).toBe(true);
 });
+
+test("assigns a receipt to one of two stores and restores it", async ({
+  page,
+  request,
+}) => {
+  const brandResponse = await request.post("/api/v1/merchant-brands", {
+    data: { name: "Synthetic Browser Brand" },
+  });
+  expect(brandResponse.ok()).toBe(true);
+  const brand = (await brandResponse.json()) as { id: string; name: string };
+  const firstStoreResponse = await request.post("/api/v1/merchant-stores", {
+    data: { brandId: brand.id, name: "Synthetic Store North" },
+  });
+  const secondStoreResponse = await request.post("/api/v1/merchant-stores", {
+    data: { brandId: brand.id, name: "Synthetic Store South" },
+  });
+  expect(firstStoreResponse.ok()).toBe(true);
+  expect(secondStoreResponse.ok()).toBe(true);
+  const secondStore = (await secondStoreResponse.json()) as {
+    id: string;
+    name: string;
+  };
+  const receiptResponse = await request.post("/api/v1/receipts", {
+    data: {
+      merchantRaw: "Synthetic printed merchant label",
+      purchaseDate: "2026-07-20",
+      totalCents: 250,
+      lineItems: [],
+    },
+  });
+  const receipt = (await receiptResponse.json()) as { id: string };
+
+  await page.goto(`/receipts/${receipt.id}`);
+  await page.getByLabel("Brand").focus();
+  await page.getByLabel("Brand").selectOption(brand.id);
+  await page.getByLabel("Store").selectOption(secondStore.id);
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText("Receipt saved.")).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel("Merchant")).toHaveValue(
+    "Synthetic printed merchant label",
+  );
+  await expect(page.getByLabel("Brand")).toHaveValue(brand.id);
+  await expect(page.getByLabel("Store")).toHaveValue(secondStore.id);
+});

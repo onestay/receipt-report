@@ -8,13 +8,25 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { useState } from "react";
 import {
   App,
   formatDate,
   lineTotalSum,
+  MerchantIdentity,
+  type MerchantIdentityValue,
   parseMoney,
   parseQuantity,
 } from "./App.js";
+
+function MerchantHarness({
+  initial = { merchantBrandId: null, merchantStoreId: null },
+}: {
+  initial?: MerchantIdentityValue;
+}) {
+  const [value, setValue] = useState(initial);
+  return <MerchantIdentity value={value} onChange={setValue} />;
+}
 
 afterEach(() => {
   cleanup();
@@ -181,6 +193,97 @@ describe("application shell", () => {
     ).toBeInTheDocument();
   });
 
+  it("assigns a scoped merchant store and confirms clearing its brand", async () => {
+    history.replaceState({}, "", "/receipts/new");
+    const brand = {
+      id: "cm11111111111111111111111",
+      name: "EDEKA",
+      normalizedName: "edeka",
+      createdAt: "2026-07-19T00:00:00.000Z",
+      updatedAt: "2026-07-19T00:00:00.000Z",
+    };
+    const store = {
+      id: "cm22222222222222222222222",
+      brandId: brand.id,
+      name: "EDEKA Müller",
+      normalizedName: "edeka müller",
+      street: null,
+      postalCode: null,
+      city: null,
+      normalizedAddressKey: "\u001f\u001f",
+      createdAt: brand.createdAt,
+      updatedAt: brand.updatedAt,
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/api/v1/merchant-brands"))
+        return new Response(
+          JSON.stringify({ brands: [brand], nextCursor: null }),
+        );
+      if (url.startsWith("/api/v1/merchant-stores"))
+        return new Response(
+          JSON.stringify({ stores: [store], nextCursor: null }),
+        );
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    const brandSelect = screen.getByLabelText("Brand");
+    fireEvent.focus(brandSelect);
+    await screen.findByRole("option", { name: "EDEKA" });
+    fireEvent.change(brandSelect, { target: { value: brand.id } });
+    await screen.findByRole("option", { name: "EDEKA Müller" });
+    fireEvent.change(screen.getByLabelText("Store"), {
+      target: { value: store.id },
+    });
+    fireEvent.change(brandSelect, { target: { value: "" } });
+    expect(screen.getByRole("alertdialog")).toHaveTextContent(
+      "Clear the selected store",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(brandSelect).toHaveValue(brand.id);
+    expect(screen.getByLabelText("Store")).toHaveValue(store.id);
+    fireEvent.change(brandSelect, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(brandSelect).toHaveValue("");
+    expect(screen.getByLabelText("Store")).toBeDisabled();
+  });
+
+  it("creates and selects a brand inline without losing receipt edits", async () => {
+    history.replaceState({}, "", "/receipts/new");
+    const brand = {
+      id: "cm33333333333333333333333",
+      name: "REWE",
+      normalizedName: "rewe",
+      createdAt: "2026-07-19T00:00:00.000Z",
+      updatedAt: "2026-07-19T00:00:00.000Z",
+    };
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === "/api/v1/merchant-brands" && init?.method === "POST")
+          return new Response(JSON.stringify(brand), { status: 201 });
+        if (url.startsWith("/api/v1/merchant-stores"))
+          return new Response(JSON.stringify({ stores: [], nextCursor: null }));
+        return new Response(JSON.stringify({ brands: [], nextCursor: null }));
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Merchant"), {
+      target: { value: "REWE Markt 42" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "+ Create brand" }));
+    fireEvent.change(screen.getByLabelText("Brand name"), {
+      target: { value: "REWE" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create and select" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Brand")).toHaveValue(brand.id),
+    );
+    expect(screen.getByLabelText("Merchant")).toHaveValue("REWE Markt 42");
+  });
+
   it.each([
     [
       "server",
@@ -263,6 +366,118 @@ describe("application shell", () => {
     expect(
       screen.getByRole("heading", { name: "Purchases, clearly kept." }),
     ).toHaveFocus();
+  });
+});
+
+describe("merchant identity controls", () => {
+  const brand = {
+    id: "cm44444444444444444444444",
+    name: "EDEKA",
+    normalizedName: "edeka",
+    createdAt: "2026-07-19T00:00:00.000Z",
+    updatedAt: "2026-07-19T00:00:00.000Z",
+  };
+  const store = {
+    id: "cm55555555555555555555555",
+    brandId: brand.id,
+    name: "EDEKA Center",
+    normalizedName: "edeka center",
+    street: "Marktstraße 1",
+    postalCode: "10115",
+    city: "Berlin",
+    normalizedAddressKey: "marktstraße 1\u001f10115\u001fberlin",
+    createdAt: brand.createdAt,
+    updatedAt: brand.updatedAt,
+  };
+
+  it("recovers when brand options fail to load", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("offline"))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ brands: [brand], nextCursor: null })),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MerchantHarness />);
+    fireEvent.focus(screen.getByLabelText("Brand"));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "could not be loaded",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("option", { name: "EDEKA" })).toBeVisible();
+  });
+
+  it("resolves an exact brand conflict to the existing brand", async () => {
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === "/api/v1/merchant-brands" && init?.method === "POST")
+          return new Response(
+            JSON.stringify({ error: { code: "conflict", message: "exists" } }),
+            { status: 409 },
+          );
+        if (url.startsWith("/api/v1/merchant-brands?query="))
+          return new Response(
+            JSON.stringify({ brands: [brand], nextCursor: null }),
+          );
+        if (url.startsWith("/api/v1/merchant-stores"))
+          return new Response(JSON.stringify({ stores: [], nextCursor: null }));
+        return new Response(JSON.stringify({ brands: [], nextCursor: null }));
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MerchantHarness />);
+    fireEvent.click(screen.getByRole("button", { name: "+ Create brand" }));
+    fireEvent.change(screen.getByLabelText("Brand name"), {
+      target: { value: "  edeka  " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create and select" }));
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "already exists",
+    );
+    expect(screen.getByLabelText("Brand")).toHaveValue(brand.id);
+  });
+
+  it("creates a fully addressed store and selects it", async () => {
+    let posted: Record<string, unknown> | undefined;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === "/api/v1/merchant-stores" && init?.method === "POST") {
+          posted = JSON.parse(String(init.body)) as Record<string, unknown>;
+          return new Response(JSON.stringify(store), { status: 201 });
+        }
+        return new Response(JSON.stringify({ stores: [], nextCursor: null }));
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <MerchantHarness
+        initial={{ merchantBrandId: brand.id, merchantStoreId: null }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "+ Create store" }));
+    fireEvent.change(screen.getByLabelText("Store name"), {
+      target: { value: store.name },
+    });
+    fireEvent.change(screen.getByLabelText(/Street/), {
+      target: { value: store.street },
+    });
+    fireEvent.change(screen.getByLabelText(/Postal code/), {
+      target: { value: store.postalCode },
+    });
+    fireEvent.change(screen.getByLabelText(/City/), {
+      target: { value: store.city },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create and select" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Store")).toHaveValue(store.id),
+    );
+    expect(posted).toMatchObject({
+      brandId: brand.id,
+      name: store.name,
+      city: store.city,
+    });
   });
 });
 

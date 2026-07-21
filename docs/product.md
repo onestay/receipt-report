@@ -54,3 +54,16 @@ reviewable and correctable.
 - User corrections take precedence over later reprocessing.
 - Sensitive data remains under the operator's control, except when explicitly
   sent to the configured model provider.
+
+## Manual merchant identity workflow
+
+Manual receipt entry always keeps the printed or free-form merchant label as
+the primary editable value. A user may additionally assign a canonical brand
+and, once a brand is selected, one of its stores. The raw label remains what the
+ledger leads with; canonical identity is shown separately for grouping and
+future reporting.
+
+Brands and stores can be created in place without discarding receipt edits.
+Those merchant records are saved immediately and independently of the receipt.
+Changing or clearing a brand while a store is selected requires an explicit
+in-page confirmation because confirming also clears the incompatible store.

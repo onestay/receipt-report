@@ -34,7 +34,8 @@ body {
 }
 button,
 input,
-textarea {
+textarea,
+select {
   font: inherit;
 }
 a {
@@ -293,7 +294,8 @@ h1 {
   font-weight: 450;
 }
 .field input,
-.field textarea {
+.field textarea,
+.field select {
   width: 100%;
   min-height: 3rem;
   padding: 0.75rem 0.85rem;
@@ -310,6 +312,62 @@ h1 {
   box-shadow: 0 0 0 2px rgb(167 62 50 / 12%);
 }
 .field-error {
+  color: #9b3027;
+}
+.merchant-identity {
+  min-width: 0;
+  margin: 0;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+}
+.merchant-identity legend {
+  padding: 0 0.35rem;
+  font-weight: 750;
+}
+.merchant-identity legend span,
+.merchant-identity > p {
+  color: var(--muted);
+  font-weight: 450;
+}
+.merchant-selects,
+.inline-create {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+.merchant-create-actions {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.8rem;
+}
+.merchant-create-actions button,
+.inline-error button {
+  border: 0;
+  background: transparent;
+  color: var(--forest);
+  font-weight: 750;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.inline-create,
+.inline-confirmation {
+  margin-top: 1rem;
+  padding: 1rem;
+  border-radius: 0.8rem;
+  background: var(--sage);
+}
+.inline-create .button {
+  align-self: end;
+}
+.inline-confirmation p {
+  margin: 0.4rem 0 1rem;
+}
+.inline-confirmation .button + .button {
+  margin-left: 0.6rem;
+}
+.inline-error {
+  margin-bottom: 0.8rem;
   color: #9b3027;
 }
 .money-input {
