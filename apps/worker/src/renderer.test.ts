@@ -189,12 +189,23 @@ describe("local renderer", () => {
   });
 
   it("sanitizes failed native commands", async () => {
-    await expect(
-      runLimitedCommand("definitely-not-a-command", [], {
-        timeoutMs: 1000,
-        maxBuffer: 1024,
-        memoryMb: 64,
-      }),
-    ).rejects.toMatchObject({ code: "renderer_failed" });
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    try {
+      await expect(
+        runLimitedCommand("definitely-not-a-command", [], {
+          timeoutMs: 1000,
+          maxBuffer: 1024,
+          memoryMb: 64,
+        }),
+      ).rejects.toMatchObject({ code: "renderer_failed" });
+      expect(consoleError).toHaveBeenCalledWith(
+        "Document renderer command failed",
+        expect.objectContaining({ command: "definitely-not-a-command" }),
+      );
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 });

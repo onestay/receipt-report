@@ -54,6 +54,12 @@ export async function runLimitedCommand(
       },
       (error, stdout, stderr) => {
         if (error) {
+          console.error("Document renderer command failed", {
+            command,
+            code: error.code ?? "unknown",
+            signal: error.signal ?? null,
+            killed: error.killed,
+          });
           reject(new RendererFailure("renderer_failed"));
           return;
         }

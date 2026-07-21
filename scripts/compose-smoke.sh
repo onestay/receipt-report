@@ -4,7 +4,13 @@ set -euo pipefail
 project_name="receipt-report-smoke-${CI_RUN_ID:-local}-$$"
 
 cleanup() {
+  status=$?
+  if [[ "$status" -ne 0 ]]; then
+    docker compose --project-name "$project_name" ps --all || true
+    docker compose --project-name "$project_name" logs --no-color || true
+  fi
   docker compose --project-name "$project_name" down --volumes --remove-orphans --timeout 15
+  exit "$status"
 }
 trap cleanup EXIT
 
