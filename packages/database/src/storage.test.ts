@@ -165,13 +165,16 @@ describe("document persistence coordinator", () => {
       byteSize: 3,
       sha256: "a".repeat(64),
     });
-    const target = originalDocumentPath(document.id, "png");
+    const stored = await db().receiptDocument.findUniqueOrThrow({
+      where: { id: document.id },
+    });
+    const target = stored.relativePath;
     expect(await storage.exists(target)).toBe(true);
-    expect(
-      await db().receiptDocument.findUnique({
-        where: { id: document.id },
-      }),
-    ).toMatchObject({ receiptId: receipt.id, relativePath: target });
+    expect(stored).toMatchObject({
+      receiptId: receipt.id,
+      relativePath: target,
+    });
+    expect(await db().documentFileCleanup.count()).toBe(0);
     await expect(
       db().receipt.delete({ where: { id: receipt.id } }),
     ).rejects.toThrow();
@@ -242,8 +245,14 @@ describe("document persistence coordinator", () => {
       ),
     ).rejects.toThrow("injected");
     expect(recorded).toEqual([expect.stringMatching(/original\.jpg$/)]);
+    expect(
+      await db().documentFileCleanup.findUnique({
+        where: { relativePath: recorded[0] },
+      }),
+    ).toMatchObject({ relativePath: recorded[0] });
     storage.cleanup = cleanup;
     await cleanup(recorded[0] ?? "missing");
+    await db().documentFileCleanup.deleteMany();
   });
 
   it("enforces ordered page uniqueness", async () => {

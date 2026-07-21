@@ -106,6 +106,12 @@ until a later storage-aware removal operation removes its files and metadata.
 Uploads stream into a bounded staging file while computing SHA-256, and actual
 JPEG, PNG, or PDF type and structure are checked without decoding pixels or
 rendering PDF content. Exact `(SHA-256, byte size)` uniqueness is store-wide.
+The initial bounded PDF validator intentionally accepts only PDFs whose page
+objects and classic cross-reference table are visible in the file structure;
+PDFs using compressed object/cross-reference streams are rejected until the
+isolated normalization renderer in the next milestone becomes the definitive
+parser. This conservative compatibility limit avoids decompressing or executing
+PDF content in the API process.
 Replacement promotes a new, separately named original before transactionally
 repointing metadata; the old path is then cleaned through a durable retry record.
 Removal first records cleanup and removes metadata transactionally, then deletes

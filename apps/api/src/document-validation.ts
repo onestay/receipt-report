@@ -166,6 +166,7 @@ async function validateJpeg(
     if (markerBytes.length !== 2 || markerBytes[0] !== 0xff)
       throw new MalformedDocumentError();
     while (markerBytes[1] === 0xff) {
+      deadlineGuard(deadline);
       position += 1;
       markerBytes = await storage.readAt(path, position, 2);
     }

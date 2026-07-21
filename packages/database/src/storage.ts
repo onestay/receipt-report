@@ -195,19 +195,24 @@ export async function persistOriginalDocument(
     onCleanupFailure?: ((relativePath: string) => Promise<void>) | undefined;
   } = {},
 ): Promise<{ id: string }> {
-  let promotedPath: string | undefined;
   const extension =
     input.mediaType === "application/pdf"
       ? "pdf"
       : input.mediaType === "image/png"
         ? "png"
         : "jpg";
+  const promotedPath = originalDocumentPath(randomUUID(), extension);
+  await database.documentFileCleanup.create({
+    data: { relativePath: promotedPath },
+  });
   try {
+    await storage.promote(input.stagedRelativePath, promotedPath);
+    await hooks.afterPromote?.();
     return await database.$transaction(async (transaction) => {
       const document = await transaction.receiptDocument.create({
         data: {
           receiptId: input.receiptId,
-          relativePath: `pending/${randomUUID()}`,
+          relativePath: promotedPath,
           originalFilename: input.originalFilename,
           mediaType: input.mediaType,
           byteSize: input.byteSize,
@@ -215,23 +220,20 @@ export async function persistOriginalDocument(
         },
         select: { id: true },
       });
-      promotedPath = originalDocumentPath(document.id, extension);
-      await storage.promote(input.stagedRelativePath, promotedPath);
-      await hooks.afterPromote?.();
-      return transaction.receiptDocument.update({
-        where: { id: document.id },
-        data: { relativePath: promotedPath },
-        select: { id: true },
+      await transaction.documentFileCleanup.delete({
+        where: { relativePath: promotedPath },
       });
+      return document;
     });
   } catch (error) {
-    if (promotedPath) {
-      try {
-        await storage.cleanup(promotedPath);
-      } catch (cleanupError) {
-        if (!hooks.onCleanupFailure) throw cleanupError;
-        await hooks.onCleanupFailure(promotedPath);
-      }
+    try {
+      await storage.cleanup(promotedPath);
+      await database.documentFileCleanup.deleteMany({
+        where: { relativePath: promotedPath },
+      });
+    } catch (cleanupError) {
+      if (!hooks.onCleanupFailure) throw cleanupError;
+      await hooks.onCleanupFailure(promotedPath);
     }
     throw error;
   }

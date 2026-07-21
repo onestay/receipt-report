@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FilesystemDocumentStorage } from "@receipt-report/database";
 import {
   DocumentValidationTimeoutError,
@@ -212,6 +212,26 @@ describe("document structural validation", () => {
     await expect(
       validate(jpeg({ prefix: Buffer.from([0xff, 0xff, 0x01]) })),
     ).resolves.toBe("image/jpeg");
+  });
+
+  it("checks the wall-time bound while skipping JPEG fill bytes", async () => {
+    const now = vi
+      .spyOn(Date, "now")
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(0)
+      .mockReturnValue(2);
+    await expect(
+      validate(
+        jpeg({
+          prefix: Buffer.concat([
+            Buffer.alloc(8_192, 0xff),
+            Buffer.from([0x01]),
+          ]),
+        }),
+        { ...limits, timeoutMs: 1 },
+      ),
+    ).rejects.toBeInstanceOf(DocumentValidationTimeoutError);
+    now.mockRestore();
   });
 
   it("rejects encrypted, incomplete, over-page, and timed-out PDFs", async () => {

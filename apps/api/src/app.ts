@@ -353,7 +353,10 @@ export function createApp(options: AppOptions = {}): Express {
     response,
     _next,
   ) => {
-    void _next;
+    if (response.headersSent) {
+      _next(error);
+      return;
+    }
     if (error instanceof ZodError || error instanceof SyntaxError) {
       response
         .status(400)
