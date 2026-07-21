@@ -28,6 +28,7 @@ export class DocumentUploadError extends Error {
       | "conflict"
       | "network_error"
       | "server_error"
+      | "remove_error"
       | "cancelled",
     readonly duplicateReceiptId?: string,
   ) {
@@ -55,6 +56,8 @@ function failureMessage(error: unknown): string {
       return "The local API could not be reached. Your receipt edits and selected file are still here.";
     case "cancelled":
       return "Upload cancelled. The selected file is still ready to retry.";
+    case "remove_error":
+      return "The document could not be removed. It is still attached; try again.";
     default:
       return "The server could not store the document. Nothing was attached; try again.";
   }
@@ -252,6 +255,7 @@ export function DocumentPanel({ receiptId }: { receiptId: string }) {
   const [imageStates, setImageStates] = useState<
     Record<string, "loaded" | "error">
   >({});
+  const [pollAttempt, setPollAttempt] = useState(0);
   const abortRef = useRef<AbortController | undefined>(undefined);
   const inputRef = useRef<HTMLInputElement>(null);
   const pageRefs = useRef<(HTMLElement | null)[]>([]);
@@ -291,9 +295,19 @@ export function DocumentPanel({ receiptId }: { receiptId: string }) {
         document.normalizationStatus !== "running")
     )
       return;
-    const timer = window.setTimeout(() => void load(true), 600);
-    return () => window.clearTimeout(timer);
-  }, [document, load]);
+    let active = true;
+    const timer = window.setTimeout(
+      () =>
+        void load(true).finally(() => {
+          if (active) setPollAttempt((attempt) => attempt + 1);
+        }),
+      600,
+    );
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [document, load, pollAttempt]);
 
   const upload = async (replace: boolean) => {
     if (!file || busy) return;
@@ -327,6 +341,7 @@ export function DocumentPanel({ receiptId }: { receiptId: string }) {
     if (busy) return;
     setBusy("retry");
     setError("");
+    setDuplicateReceiptId(undefined);
     try {
       const response = await fetch(
         `/api/v1/receipts/${receiptId}/document/normalization`,
@@ -345,11 +360,12 @@ export function DocumentPanel({ receiptId }: { receiptId: string }) {
     if (busy) return;
     setBusy("remove");
     setError("");
+    setDuplicateReceiptId(undefined);
     try {
       const response = await fetch(`/api/v1/receipts/${receiptId}/document`, {
         method: "DELETE",
       });
-      if (!response.ok) throw new DocumentUploadError("server_error");
+      if (!response.ok) throw new DocumentUploadError("remove_error");
       setDocument(null);
       setConfirming(null);
       setFile(null);

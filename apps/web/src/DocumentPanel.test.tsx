@@ -108,6 +108,7 @@ describe("document upload helpers", () => {
     ["network_error", "could not be reached"],
     ["cancelled", "cancelled"],
     ["server_error", "could not store"],
+    ["remove_error", "could not be removed"],
   ] as const)("presents a bounded %s message", (code, copy) => {
     expect(failureMessage(new DocumentUploadError(code))).toContain(copy);
   });
@@ -288,7 +289,7 @@ describe("document panel", () => {
     expect(screen.queryAllByText("Loading page…")).toHaveLength(0);
   });
 
-  it("polls pending preparation to completion", async () => {
+  it("recovers polling after a transient status failure", async () => {
     let documentReads = 0;
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
@@ -296,9 +297,11 @@ describe("document panel", () => {
         return Promise.resolve(response(configuration));
       if (url.endsWith("/document")) {
         documentReads += 1;
+        if (documentReads === 2)
+          return Promise.reject(new TypeError("transient"));
         return Promise.resolve(
           response(
-            documentReads === 1 ? makeDocument("pending", []) : makeDocument(),
+            documentReads < 3 ? makeDocument("pending", []) : makeDocument(),
           ),
         );
       }
@@ -309,8 +312,12 @@ describe("document panel", () => {
     expect(
       await screen.findByText(/Queued for page preparation/),
     ).toBeVisible();
-    expect(await screen.findByText("2 pages ready for review.")).toBeVisible();
-    expect(documentReads).toBe(2);
+    expect(
+      await screen.findByText("2 pages ready for review.", undefined, {
+        timeout: 2_500,
+      }),
+    ).toBeVisible();
+    expect(documentReads).toBe(3);
   });
 
   it.each([
@@ -449,10 +456,59 @@ describe("document panel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove document" }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm remove" }));
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("could not store");
+    expect(alert).toHaveTextContent("could not be removed");
     await waitFor(() => expect(alert).toHaveFocus());
     expect(screen.getByText("markt.pdf")).toBeVisible();
     expect(screen.getByRole("alertdialog")).toBeVisible();
+  });
+
+  it("clears a stale duplicate link before an unrelated removal failure", async () => {
+    const original = makeDocument();
+    const duplicateReceiptId = "cm92345678901234567890123";
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/v1/document-upload-configuration")
+        return Promise.resolve(response(configuration));
+      if (url.endsWith("/document") && init?.method === "PUT")
+        return Promise.resolve(
+          response(
+            {
+              error: {
+                code: "duplicate_document",
+                message: "duplicate",
+                details: { receiptId: duplicateReceiptId, documentId },
+              },
+            },
+            409,
+          ),
+        );
+      if (url.endsWith("/document") && init?.method === "DELETE")
+        return Promise.resolve(response(null, 500));
+      if (url.endsWith("/document")) return Promise.resolve(response(original));
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<DocumentPanel receiptId={receiptId} />);
+    await screen.findByText("markt.pdf");
+    fireEvent.change(screen.getByLabelText(/Choose or drop/), {
+      target: {
+        files: [new File(["png"], "duplicate.png", { type: "image/png" })],
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Replace document" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm replace" }));
+    expect(
+      await screen.findByRole("link", { name: "Open the existing receipt" }),
+    ).toHaveAttribute("href", `/receipts/${duplicateReceiptId}`);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove document" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm remove" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "could not be removed",
+    );
+    expect(
+      screen.queryByRole("link", { name: "Open the existing receipt" }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows an empty state and a recoverable load error", async () => {
