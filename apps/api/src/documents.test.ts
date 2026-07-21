@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createDatabase,
   FilesystemDocumentStorage,
+  normalizedPageRevisionPath,
   type Database,
 } from "@receipt-report/database";
 import { createApp } from "./app.js";
@@ -101,12 +102,24 @@ describe("receipt document API", () => {
         originalFilename: filename,
         mediaType,
         byteSize: bytes.length,
+        normalizationStatus: "pending",
+        normalizationProfileVersion: null,
+        pages: [],
       });
       expect(uploaded.body).not.toHaveProperty("relativePath");
       const row = await database.receiptDocument.findUniqueOrThrow({
         where: { receiptId },
       });
       expect(await storage.read(row.relativePath)).toEqual(bytes);
+      await expect(
+        database.normalizationJob.findUniqueOrThrow({
+          where: { documentId: row.id },
+        }),
+      ).resolves.toMatchObject({
+        status: "pending",
+        profileVersion: "receipt-page-v1",
+        attempts: 0,
+      });
       await request(app())
         .get(uploaded.body.originalUrl)
         .expect(200)
@@ -230,6 +243,28 @@ describe("receipt document API", () => {
     const oldPath = (
       await database.receiptDocument.findUniqueOrThrow({ where: { receiptId } })
     ).relativePath;
+    const pagePath = normalizedPageRevisionPath(
+      first.body.id,
+      "old-revision",
+      1,
+    );
+    const stagedPage = await storage.stage(png, "worker");
+    await storage.promote(stagedPage, pagePath);
+    await database.receiptPage.create({
+      data: {
+        documentId: first.body.id,
+        pageNumber: 1,
+        totalPages: 1,
+        relativePath: pagePath,
+        mediaType: "image/png",
+        byteSize: png.length,
+        width: 1,
+        height: 1,
+        sha256: "b".repeat(64),
+        profileVersion: "receipt-page-v1",
+        renderer: "sharp/test",
+      },
+    });
     await request(app())
       .post(`/api/v1/receipts/${receiptId}/document`)
       .attach("document", jpeg, "second.jpg")
@@ -243,6 +278,13 @@ describe("receipt document API", () => {
       mediaType: "image/jpeg",
     });
     expect(await storage.exists(oldPath)).toBe(false);
+    expect(await storage.exists(pagePath)).toBe(false);
+    expect(await database.receiptPage.count()).toBe(0);
+    await expect(
+      database.normalizationJob.findUniqueOrThrow({
+        where: { documentId: first.body.id },
+      }),
+    ).resolves.toMatchObject({ status: "pending" });
     expect(await database.documentFileCleanup.count()).toBe(0);
     await request(app())
       .delete(`/api/v1/receipts/${receiptId}/document`)
@@ -290,6 +332,89 @@ describe("receipt document API", () => {
     await retryDocumentFileCleanup(database, storage);
     expect(await storage.exists(oldPath)).toBe(false);
     expect(await database.documentFileCleanup.count()).toBe(0);
+  });
+
+  it("serves only published pages and retries without discarding them", async () => {
+    const receiptId = await receipt();
+    const uploaded = await request(app())
+      .post(`/api/v1/receipts/${receiptId}/document`)
+      .attach("document", png, "page.png")
+      .expect(201);
+    const relativePath = normalizedPageRevisionPath(
+      uploaded.body.id,
+      "test-revision",
+      1,
+    );
+    const staged = await storage.stage(png, "worker");
+    await storage.promote(staged, relativePath);
+    const page = await database.receiptPage.create({
+      data: {
+        documentId: uploaded.body.id,
+        pageNumber: 1,
+        totalPages: 1,
+        relativePath,
+        mediaType: "image/png",
+        byteSize: png.length,
+        width: 1,
+        height: 1,
+        sha256: "a".repeat(64),
+        profileVersion: "receipt-page-v1",
+        renderer: "sharp/test",
+      },
+    });
+    await database.$transaction([
+      database.receiptDocument.update({
+        where: { id: uploaded.body.id },
+        data: {
+          normalizationStatus: "complete",
+          normalizationProfileVersion: "receipt-page-v1",
+          normalizationRenderer: "sharp/test",
+          normalizationCompletedAt: new Date(),
+        },
+      }),
+      database.normalizationJob.update({
+        where: { documentId: uploaded.body.id },
+        data: { status: "complete" },
+      }),
+    ]);
+
+    const fetched = await request(app())
+      .get(`/api/v1/receipts/${receiptId}/document`)
+      .expect(200);
+    expect(fetched.body).toMatchObject({
+      normalizationStatus: "complete",
+      normalizationProfileVersion: "receipt-page-v1",
+      pages: [
+        {
+          id: page.id,
+          pageNumber: 1,
+          totalPages: 1,
+          profileVersion: "receipt-page-v1",
+          renderer: "sharp/test",
+        },
+      ],
+    });
+    expect(fetched.body.pages[0]).not.toHaveProperty("relativePath");
+    await request(app())
+      .get(fetched.body.pages[0].imageUrl)
+      .expect(200)
+      .expect("Content-Type", "image/png")
+      .expect("X-Content-Type-Options", "nosniff")
+      .expect(png);
+
+    const retried = await request(app())
+      .post(`/api/v1/receipts/${receiptId}/document/normalization`)
+      .expect(202);
+    expect(retried.body).toMatchObject({
+      normalizationStatus: "pending",
+      normalizationError: null,
+      pages: [{ id: page.id }],
+    });
+    await expect(
+      database.normalizationJob.findUniqueOrThrow({
+        where: { documentId: uploaded.body.id },
+      }),
+    ).resolves.toMatchObject({ status: "pending" });
   });
 
   it("rejects missing, malformed multipart, and mismatched IDs safely", async () => {

@@ -55,6 +55,34 @@ describe("configuration", () => {
         DOCUMENT_MAX_REQUEST_BYTES: "1024",
       }),
     ).toThrow();
+    expect(() =>
+      parseApiConfig({
+        ...shared,
+        NORMALIZATION_MAX_PAGE_PIXELS: "101",
+        NORMALIZATION_MAX_TOTAL_PIXELS: "100",
+      }),
+    ).toThrow();
+  });
+
+  it("parses renderer verification explicitly", () => {
+    expect(
+      parseWorkerConfig({ ...shared, WORKER_READY_FILE: "ready" })
+        .NORMALIZATION_VERIFY_RENDERER,
+    ).toBe(true);
+    expect(
+      parseWorkerConfig({
+        ...shared,
+        WORKER_READY_FILE: "ready",
+        NORMALIZATION_VERIFY_RENDERER: "false",
+      }).NORMALIZATION_VERIFY_RENDERER,
+    ).toBe(false);
+    expect(() =>
+      parseWorkerConfig({
+        ...shared,
+        WORKER_READY_FILE: "ready",
+        NORMALIZATION_VERIFY_RENDERER: "yes",
+      }),
+    ).toThrow();
   });
 
   it("rejects overlap with a relative SQLite URL", () => {

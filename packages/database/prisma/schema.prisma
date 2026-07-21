@@ -66,36 +66,62 @@ model Receipt {
 }
 
 model ReceiptDocument {
-  id               String        @id @default(cuid())
-  receiptId        String        @unique
-  receipt          Receipt       @relation(fields: [receiptId], references: [id], onDelete: Restrict)
-  relativePath     String        @unique
-  originalFilename String?
-  mediaType        String
-  byteSize         Int
-  sha256           String
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
-  pages            ReceiptPage[]
+  id                          String            @id @default(cuid())
+  receiptId                   String            @unique
+  receipt                     Receipt           @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+  relativePath                String            @unique
+  originalFilename            String?
+  mediaType                   String
+  byteSize                    Int
+  sha256                      String
+  createdAt                   DateTime          @default(now())
+  updatedAt                   DateTime          @updatedAt
+  normalizationStatus         String            @default("pending")
+  normalizationError          String?
+  normalizationProfileVersion String?
+  normalizationRenderer       String?
+  normalizationRequestedAt    DateTime          @default(now())
+  normalizationStartedAt      DateTime?
+  normalizationCompletedAt    DateTime?
+  pages                       ReceiptPage[]
+  normalizationJob            NormalizationJob?
 
   @@unique([sha256, byteSize])
 }
 
 model ReceiptPage {
-  id           String          @id @default(cuid())
-  documentId   String
-  document     ReceiptDocument @relation(fields: [documentId], references: [id], onDelete: Restrict)
-  pageNumber   Int
-  totalPages   Int
-  relativePath String          @unique
-  mediaType    String
-  byteSize     Int
-  width        Int
-  height       Int
-  sha256       String
-  createdAt    DateTime        @default(now())
+  id             String          @id @default(cuid())
+  documentId     String
+  document       ReceiptDocument @relation(fields: [documentId], references: [id], onDelete: Restrict)
+  pageNumber     Int
+  totalPages     Int
+  relativePath   String          @unique
+  mediaType      String
+  byteSize       Int
+  width          Int
+  height         Int
+  sha256         String
+  profileVersion String
+  renderer       String
+  createdAt      DateTime        @default(now())
 
   @@unique([documentId, pageNumber])
+}
+
+model NormalizationJob {
+  id             String          @id @default(cuid())
+  documentId     String          @unique
+  document       ReceiptDocument @relation(fields: [documentId], references: [id], onDelete: Restrict)
+  status         String          @default("pending")
+  profileVersion String
+  attempts       Int             @default(0)
+  availableAt    DateTime        @default(now())
+  claimedAt      DateTime?
+  lastError      String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([status, availableAt, id])
 }
 
 /// Durable retry record for filesystem cleanup that could not complete after a

@@ -70,6 +70,8 @@ merchant grouping is a silent data loss the user cannot see.
 - Stable relative path to the original uploaded image or PDF
 - Media type, byte size, and SHA-256 digest
 - Original filename when available, stored only after sanitization
+- Normalization status, sanitized failure code, requested/started/completed
+  timestamps, profile version, and renderer identity
 
 There is initially one retained original per receipt. Exact digest-and-size
 uniqueness is enforced across the whole store. Attaching a second original is a
@@ -84,10 +86,17 @@ cleanup; ordinary receipt deletion remains restricted while a document exists.
 - Stable relative path to the normalized page image
 - Page number and total page count
 - Media type, byte size, dimensions, and SHA-256 digest
+- Normalization profile version and renderer identity
 
 Images normally produce one normalized page. PDFs may produce multiple ordered
 pages. The original file is retained while page images provide a consistent
 input for review and AI providers.
+
+Normalization jobs are intentionally single-purpose. There is at most one per
+document, and a conditional pending-to-running claim prevents concurrent workers
+from publishing competing page sets. Files are revisioned while one database
+transaction replaces the ordered page rows, so partial sets are never public.
+The original always remains retained when normalization fails.
 
 ## Line item
 

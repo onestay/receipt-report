@@ -56,6 +56,13 @@ describe("receipt document contracts", () => {
         sha256: "a".repeat(64),
         createdAt: "2026-07-21T00:00:00.000Z",
         updatedAt: "2026-07-21T00:00:00.000Z",
+        normalizationStatus: "complete",
+        normalizationError: null,
+        normalizationProfileVersion: "receipt-page-v1",
+        normalizationRenderer: "synthetic/1",
+        normalizationRequestedAt: "2026-07-21T00:00:00.000Z",
+        normalizationStartedAt: "2026-07-21T00:00:00.000Z",
+        normalizationCompletedAt: "2026-07-21T00:00:00.000Z",
         pages: [
           {
             id: brandId,
@@ -68,6 +75,8 @@ describe("receipt document contracts", () => {
             width: 10,
             height: 20,
             sha256: "b".repeat(64),
+            profileVersion: "receipt-page-v1",
+            renderer: "synthetic/1",
             createdAt: "2026-07-21T00:00:00.000Z",
           },
         ],
@@ -86,6 +95,13 @@ describe("receipt document contracts", () => {
       sha256: "bad",
       createdAt: "2026-07-21T00:00:00.000Z",
       updatedAt: "2026-07-21T00:00:00.000Z",
+      normalizationStatus: "pending",
+      normalizationError: null,
+      normalizationProfileVersion: null,
+      normalizationRenderer: null,
+      normalizationRequestedAt: "2026-07-21T00:00:00.000Z",
+      normalizationStartedAt: null,
+      normalizationCompletedAt: null,
       pages: [],
     };
     expect(receiptDocumentSchema.safeParse(base).success).toBe(false);
