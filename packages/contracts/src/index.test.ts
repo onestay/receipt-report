@@ -7,6 +7,7 @@ import {
   normalizeMerchantName,
   receiptCreateSchema,
   receiptDateSchema,
+  receiptDocumentSchema,
   receiptTimeSchema,
   receiptUpdateSchema,
 } from "./index.js";
@@ -39,6 +40,55 @@ describe("healthResponseSchema", () => {
         version: "v1",
       }),
     ).toThrow();
+  });
+});
+
+describe("receipt document contracts", () => {
+  it("accepts confined original and ordered-page metadata", () => {
+    expect(
+      receiptDocumentSchema.parse({
+        id: brandId,
+        receiptId: storeId,
+        relativePath: "originals/document/original.pdf",
+        originalFilename: "synthetic.pdf",
+        mediaType: "application/pdf",
+        byteSize: 10,
+        sha256: "a".repeat(64),
+        createdAt: "2026-07-21T00:00:00.000Z",
+        updatedAt: "2026-07-21T00:00:00.000Z",
+        pages: [
+          {
+            id: brandId,
+            documentId: brandId,
+            pageNumber: 1,
+            totalPages: 1,
+            relativePath: "pages/document/page-0001.png",
+            mediaType: "image/png",
+            byteSize: 5,
+            width: 10,
+            height: 20,
+            sha256: "b".repeat(64),
+            createdAt: "2026-07-21T00:00:00.000Z",
+          },
+        ],
+      }).pages,
+    ).toHaveLength(1);
+  });
+
+  it("rejects unsupported media, traversal paths, and malformed digests", () => {
+    const base = {
+      id: brandId,
+      receiptId: storeId,
+      relativePath: "../escape.pdf",
+      originalFilename: null,
+      mediaType: "text/plain",
+      byteSize: 1,
+      sha256: "bad",
+      createdAt: "2026-07-21T00:00:00.000Z",
+      updatedAt: "2026-07-21T00:00:00.000Z",
+      pages: [],
+    };
+    expect(receiptDocumentSchema.safeParse(base).success).toBe(false);
   });
 });
 

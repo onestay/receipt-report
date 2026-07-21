@@ -93,6 +93,21 @@ would fail its foreign key, so database and documents must be restored as one
 consistent set. Jobs begin as ordinary database records; no separate queue service is
 needed for the initial workload.
 
+Receipt document storage uses a dedicated absolute, non-root directory distinct
+from the SQLite file. Staging, retained originals, and normalized pages all live
+below that root; staging on the same filesystem allows atomic rename when a file
+is promoted. Paths stored in SQLite are generated relative paths and never
+uploaded filenames. A receipt with document metadata is deletion-restricted
+until a later storage-aware removal operation removes its files and metadata.
+
+In Compose, `/data/receipt-report.db` and `/data/documents` share the
+`receipt-data` volume and therefore form one backup unit. Stop API and worker
+writers before copying the complete volume (including SQLite WAL sidecars), and
+restore the database and document tree together. The API and worker both need
+write access: the API will stage/promote originals, while the worker publishes
+derived pages. The migration container needs the database but does not receive
+`STORAGE_PATH` or access document paths through application code.
+
 ## Trust boundaries
 
 Images, PDFs, email content, API requests, and model responses are untrusted.

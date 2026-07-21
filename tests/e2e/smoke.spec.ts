@@ -76,16 +76,17 @@ test("assigns a receipt to one of two stores and restores it", async ({
   page,
   request,
 }) => {
+  const suffix = crypto.randomUUID().slice(0, 8);
   const brandResponse = await request.post("/api/v1/merchant-brands", {
-    data: { name: "Synthetic Browser Brand" },
+    data: { name: `Synthetic Browser Brand ${suffix}` },
   });
   expect(brandResponse.ok()).toBe(true);
   const brand = (await brandResponse.json()) as { id: string; name: string };
   const firstStoreResponse = await request.post("/api/v1/merchant-stores", {
-    data: { brandId: brand.id, name: "Synthetic Store North" },
+    data: { brandId: brand.id, name: `Synthetic Store North ${suffix}` },
   });
   const secondStoreResponse = await request.post("/api/v1/merchant-stores", {
-    data: { brandId: brand.id, name: "Synthetic Store South" },
+    data: { brandId: brand.id, name: `Synthetic Store South ${suffix}` },
   });
   expect(firstStoreResponse.ok()).toBe(true);
   expect(secondStoreResponse.ok()).toBe(true);

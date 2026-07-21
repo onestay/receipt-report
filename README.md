@@ -94,7 +94,7 @@ pnpm install --frozen-lockfile
 pnpm build
 
 export DATABASE_URL=file:../../.runtime/production.db
-export STORAGE_PATH=../../.runtime/storage
+export STORAGE_PATH="$PWD/.runtime/documents"
 pnpm --filter @receipt-report/database db:migrate:deploy
 
 WEB_DIST_DIR=../web/dist \
