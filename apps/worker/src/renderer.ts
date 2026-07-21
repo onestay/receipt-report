@@ -157,7 +157,6 @@ export class LocalDocumentRenderer implements DocumentRenderer {
           "2048",
           "-png",
           absolutePath,
-          "-",
         ],
         this.commandOptions(32 * 1024 * 1024),
       );
