@@ -76,6 +76,7 @@ export class FilesystemDocumentStorage {
   async stageStream(
     source: AsyncIterable<Uint8Array>,
     maxBytes: number,
+    onCleanupFailure?: (relativePath: string) => Promise<void>,
   ): Promise<{ relativePath: string; byteSize: number; sha256: string }> {
     await this.initialize();
     const relativePath = `staging/${randomUUID()}.tmp`;
@@ -94,7 +95,12 @@ export class FilesystemDocumentStorage {
       return { relativePath, byteSize, sha256: hash.digest("hex") };
     } catch (error) {
       await handle.close();
-      await this.cleanup(relativePath);
+      try {
+        await this.cleanup(relativePath);
+      } catch (cleanupError) {
+        if (!onCleanupFailure) throw cleanupError;
+        await onCleanupFailure(relativePath);
+      }
       throw error;
     } finally {
       await handle.close().catch(() => undefined);
@@ -184,7 +190,10 @@ export async function persistOriginalDocument(
   database: PrismaClient,
   storage: FilesystemDocumentStorage,
   input: PersistOriginalInput,
-  hooks: { afterPromote?: (() => Promise<void>) | undefined } = {},
+  hooks: {
+    afterPromote?: (() => Promise<void>) | undefined;
+    onCleanupFailure?: ((relativePath: string) => Promise<void>) | undefined;
+  } = {},
 ): Promise<{ id: string }> {
   let promotedPath: string | undefined;
   const extension =
@@ -216,7 +225,14 @@ export async function persistOriginalDocument(
       });
     });
   } catch (error) {
-    if (promotedPath) await storage.cleanup(promotedPath);
+    if (promotedPath) {
+      try {
+        await storage.cleanup(promotedPath);
+      } catch (cleanupError) {
+        if (!hooks.onCleanupFailure) throw cleanupError;
+        await hooks.onCleanupFailure(promotedPath);
+      }
+    }
     throw error;
   }
 }

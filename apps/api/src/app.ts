@@ -259,10 +259,15 @@ export function createApp(options: AppOptions = {}): Express {
             Awaited<ReturnType<typeof stageMultipartDocument>> | undefined;
           try {
             const receiptId = receiptIdSchema.parse(request.params.id);
-            staged = await stageMultipartDocument(request, storage, {
-              requestBytes: config.DOCUMENT_MAX_REQUEST_BYTES,
-              fileBytes: config.DOCUMENT_MAX_BYTES,
-            });
+            staged = await stageMultipartDocument(
+              request,
+              storage,
+              {
+                requestBytes: config.DOCUMENT_MAX_REQUEST_BYTES,
+                fileBytes: config.DOCUMENT_MAX_BYTES,
+              },
+              (relativePath) => documents.discardStaged(relativePath),
+            );
             const result = await documents.ingest(receiptId, staged, replace);
             response.status(replace ? 200 : 201).json(result);
           } catch (error) {

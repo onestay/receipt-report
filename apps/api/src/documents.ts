@@ -198,6 +198,10 @@ export class DocumentRepository {
           byteSize: staged.byteSize,
           sha256: staged.sha256,
         },
+        {
+          onCleanupFailure: (relativePath) =>
+            this.recordFailedCleanup(relativePath),
+        },
       );
       const document = await this.database.receiptDocument.findUniqueOrThrow({
         where: { id: created.id },

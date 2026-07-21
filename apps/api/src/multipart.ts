@@ -21,6 +21,7 @@ export async function stageMultipartDocument(
   request: Request,
   storage: FilesystemDocumentStorage,
   limits: { requestBytes: number; fileBytes: number },
+  onCleanupFailure?: (relativePath: string) => Promise<void>,
 ): Promise<StagedMultipartDocument> {
   const contentLength = Number(request.headers["content-length"]);
   if (Number.isFinite(contentLength) && contentLength > limits.requestBytes)
@@ -79,7 +80,9 @@ export async function stageMultipartDocument(
     stream.once("limit", () => {
       fileTooLarge = true;
     });
-    staged.push(storage.stageStream(stream, limits.fileBytes));
+    staged.push(
+      storage.stageStream(stream, limits.fileBytes, onCleanupFailure),
+    );
   });
   parser.on("field", () => {
     invalidPart = true;

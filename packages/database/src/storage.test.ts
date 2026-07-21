@@ -120,6 +120,20 @@ describe("filesystem document storage", () => {
     expect(await readdir(join(storage.root, "staging"))).toEqual([]);
   });
 
+  it("reports failed staging cleanup for durable retry", async () => {
+    const cleanup = storage.cleanup.bind(storage);
+    storage.cleanup = async () => Promise.reject(new Error("injected cleanup"));
+    const recorded: string[] = [];
+    await expect(
+      storage.stageStream(Readable.from([]), 1, async (path) => {
+        recorded.push(path);
+      }),
+    ).rejects.toBeInstanceOf(EmptyDocumentError);
+    expect(recorded).toEqual([expect.stringMatching(/^staging\//)]);
+    storage.cleanup = cleanup;
+    await cleanup(recorded[0] ?? "missing");
+  });
+
   it("builds safe revision paths", () => {
     expect(replacementOriginalDocumentPath("doc_1", ".JPG", "rev_2")).toBe(
       "originals/doc_1/original-rev_2.jpg",
@@ -193,6 +207,43 @@ describe("document persistence coordinator", () => {
       }),
     ).toBeNull();
     expect(await storage.exists(staged)).toBe(false);
+  });
+
+  it("reports retryable cleanup when compensating removal fails", async () => {
+    const receipt = await db().receipt.create({
+      data: {
+        merchantRaw: "Synthetic",
+        purchaseDate: "2026-07-21",
+        totalCents: 1,
+      },
+    });
+    const staged = await storage.stage(new Uint8Array([1]));
+    const cleanup = storage.cleanup.bind(storage);
+    storage.cleanup = async () => Promise.reject(new Error("injected cleanup"));
+    const recorded: string[] = [];
+    await expect(
+      persistOriginalDocument(
+        db(),
+        storage,
+        {
+          receiptId: receipt.id,
+          stagedRelativePath: staged,
+          originalFilename: null,
+          mediaType: "image/jpeg",
+          byteSize: 1,
+          sha256: "e".repeat(64),
+        },
+        {
+          afterPromote: async () => Promise.reject(new Error("injected")),
+          onCleanupFailure: async (path) => {
+            recorded.push(path);
+          },
+        },
+      ),
+    ).rejects.toThrow("injected");
+    expect(recorded).toEqual([expect.stringMatching(/original\.jpg$/)]);
+    storage.cleanup = cleanup;
+    await cleanup(recorded[0] ?? "missing");
   });
 
   it("enforces ordered page uniqueness", async () => {
