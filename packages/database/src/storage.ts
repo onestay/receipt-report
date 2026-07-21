@@ -1,4 +1,5 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { createReadStream, type ReadStream } from "node:fs";
 import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 import type { PrismaClient } from "@prisma/client";
@@ -17,6 +18,16 @@ export function originalDocumentPath(
   if (!/^(jpe?g|png|pdf)$/.test(normalized))
     throw new Error("Unsupported document extension");
   return `originals/${safeSegment(documentId)}/original.${normalized}`;
+}
+
+export function replacementOriginalDocumentPath(
+  documentId: string,
+  extension: string,
+  revision: string = randomUUID(),
+): string {
+  const base = originalDocumentPath(documentId, extension);
+  const dot = base.lastIndexOf(".");
+  return `${base.slice(0, dot)}-${safeSegment(revision)}${base.slice(dot)}`;
 }
 
 export function normalizedPagePath(
@@ -62,6 +73,34 @@ export class FilesystemDocumentStorage {
     return relativePath;
   }
 
+  async stageStream(
+    source: AsyncIterable<Uint8Array>,
+    maxBytes: number,
+  ): Promise<{ relativePath: string; byteSize: number; sha256: string }> {
+    await this.initialize();
+    const relativePath = `staging/${randomUUID()}.tmp`;
+    const handle = await open(this.path(relativePath), "wx", 0o600);
+    const hash = createHash("sha256");
+    let byteSize = 0;
+    try {
+      for await (const chunk of source) {
+        byteSize += chunk.byteLength;
+        if (byteSize > maxBytes) throw new DocumentStorageLimitError();
+        hash.update(chunk);
+        await handle.write(chunk);
+      }
+      if (byteSize === 0) throw new EmptyDocumentError();
+      await handle.sync();
+      return { relativePath, byteSize, sha256: hash.digest("hex") };
+    } catch (error) {
+      await handle.close();
+      await this.cleanup(relativePath);
+      throw error;
+    } finally {
+      await handle.close().catch(() => undefined);
+    }
+  }
+
   async promote(
     stagedRelativePath: string,
     targetRelativePath: string,
@@ -79,6 +118,39 @@ export class FilesystemDocumentStorage {
     return readFile(this.path(relativePath));
   }
 
+  async readHead(relativePath: string, maxBytes: number): Promise<Buffer> {
+    const handle = await open(this.path(relativePath), "r");
+    try {
+      const buffer = Buffer.alloc(maxBytes);
+      const { bytesRead } = await handle.read(buffer, 0, maxBytes, 0);
+      return buffer.subarray(0, bytesRead);
+    } finally {
+      await handle.close();
+    }
+  }
+
+  async readAt(
+    relativePath: string,
+    position: number,
+    length: number,
+  ): Promise<Buffer> {
+    const handle = await open(this.path(relativePath), "r");
+    try {
+      const buffer = Buffer.alloc(length);
+      const { bytesRead } = await handle.read(buffer, 0, length, position);
+      return buffer.subarray(0, bytesRead);
+    } finally {
+      await handle.close();
+    }
+  }
+
+  createReadStream(
+    relativePath: string,
+    options?: { highWaterMark?: number },
+  ): ReadStream {
+    return createReadStream(this.path(relativePath), options);
+  }
+
   async cleanup(relativePath: string): Promise<void> {
     await rm(this.path(relativePath), { force: true });
   }
@@ -94,6 +166,10 @@ export class FilesystemDocumentStorage {
     }
   }
 }
+
+export class DocumentStorageLimitError extends Error {}
+
+export class EmptyDocumentError extends Error {}
 
 export type PersistOriginalInput = {
   receiptId: string;

@@ -14,6 +14,28 @@ export class ConflictError extends Error {}
  */
 export class InvalidReferenceError extends Error {}
 
+export class DocumentRequestError extends Error {
+  constructor(
+    readonly code:
+      | "document_too_large"
+      | "unsupported_document"
+      | "malformed_document"
+      | "multipart_error",
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+export class DuplicateDocumentError extends Error {
+  constructor(
+    readonly receiptId: string,
+    readonly documentId: string,
+  ) {
+    super("Document is already attached");
+  }
+}
+
 /**
  * Reads a Prisma known-request error code structurally. `instanceof` against
  * `PrismaClientKnownRequestError` is unreliable because the generated client

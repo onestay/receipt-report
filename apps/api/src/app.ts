@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import express, { type ErrorRequestHandler, type Express } from "express";
+import type { ApiConfig } from "@receipt-report/config";
 import {
   apiErrorSchema,
   healthResponseSchema,
@@ -17,21 +18,39 @@ import {
   receiptUpdateSchema,
   type ApiError,
 } from "@receipt-report/contracts";
-import type { Database } from "@receipt-report/database";
+import type {
+  Database,
+  FilesystemDocumentStorage,
+} from "@receipt-report/database";
 import { ZodError } from "zod";
 import {
   ConflictError,
+  DocumentRequestError,
+  DuplicateDocumentError,
   InvalidCursorError,
   InvalidReferenceError,
   NotFoundError,
   prismaErrorCode,
 } from "./errors.js";
+import { DocumentRepository } from "./documents.js";
 import { MerchantRepository } from "./merchants.js";
+import { stageMultipartDocument } from "./multipart.js";
 import { ReceiptRepository } from "./receipts.js";
 
 export type AppOptions = {
   webDistDirectory?: string;
   database?: Database;
+  documentStorage?: FilesystemDocumentStorage;
+  documentConfig?: Pick<
+    ApiConfig,
+    | "DOCUMENT_MAX_BYTES"
+    | "DOCUMENT_MAX_REQUEST_BYTES"
+    | "DOCUMENT_MAX_PDF_PAGES"
+    | "DOCUMENT_MAX_IMAGE_WIDTH"
+    | "DOCUMENT_MAX_IMAGE_HEIGHT"
+    | "DOCUMENT_MAX_DECODED_PIXELS"
+    | "DOCUMENT_VALIDATION_TIMEOUT_MS"
+  >;
 };
 
 export function createApp(options: AppOptions = {}): Express {
@@ -218,6 +237,92 @@ export function createApp(options: AppOptions = {}): Express {
         next(error);
       }
     });
+
+    if (options.documentStorage && options.documentConfig) {
+      const storage = options.documentStorage;
+      const config = options.documentConfig;
+      const documents = new DocumentRepository(options.database, storage, {
+        maxPdfPages: config.DOCUMENT_MAX_PDF_PAGES,
+        maxImageWidth: config.DOCUMENT_MAX_IMAGE_WIDTH,
+        maxImageHeight: config.DOCUMENT_MAX_IMAGE_HEIGHT,
+        maxDecodedPixels: config.DOCUMENT_MAX_DECODED_PIXELS,
+        timeoutMs: config.DOCUMENT_VALIDATION_TIMEOUT_MS,
+      });
+      const ingest =
+        (replace: boolean) =>
+        async (
+          request: express.Request,
+          response: express.Response,
+          next: express.NextFunction,
+        ) => {
+          let staged:
+            Awaited<ReturnType<typeof stageMultipartDocument>> | undefined;
+          try {
+            const receiptId = receiptIdSchema.parse(request.params.id);
+            staged = await stageMultipartDocument(request, storage, {
+              requestBytes: config.DOCUMENT_MAX_REQUEST_BYTES,
+              fileBytes: config.DOCUMENT_MAX_BYTES,
+            });
+            const result = await documents.ingest(receiptId, staged, replace);
+            response.status(replace ? 200 : 201).json(result);
+          } catch (error) {
+            next(error);
+          } finally {
+            if (staged) await documents.discardStaged(staged.relativePath);
+          }
+        };
+      app.post("/api/v1/receipts/:id/document", ingest(false));
+      app.put("/api/v1/receipts/:id/document", ingest(true));
+      app.get(
+        "/api/v1/receipts/:id/document",
+        async (request, response, next) => {
+          try {
+            response.json(
+              await documents.get(receiptIdSchema.parse(request.params.id)),
+            );
+          } catch (error) {
+            next(error);
+          }
+        },
+      );
+      app.delete(
+        "/api/v1/receipts/:id/document",
+        async (request, response, next) => {
+          try {
+            await documents.remove(receiptIdSchema.parse(request.params.id));
+            response.status(204).end();
+          } catch (error) {
+            next(error);
+          }
+        },
+      );
+      app.get(
+        "/api/v1/receipts/:receiptId/documents/:documentId/original",
+        async (request, response, next) => {
+          try {
+            const original = await documents.original(
+              receiptIdSchema.parse(request.params.receiptId),
+              idSchema.parse(request.params.documentId),
+            );
+            const asciiFilename = original.filename.replace(
+              /[^A-Za-z0-9._-]/g,
+              "_",
+            );
+            response.set({
+              "Content-Type": original.mediaType,
+              "Content-Length": String(original.byteSize),
+              "Content-Disposition": `inline; filename="${asciiFilename}"; filename*=UTF-8''${encodeURIComponent(original.filename)}`,
+              "X-Content-Type-Options": "nosniff",
+              "Cache-Control": "private, no-store",
+            });
+            original.stream.once("error", next);
+            original.stream.pipe(response);
+          } catch (error) {
+            next(error);
+          }
+        },
+      );
+    }
   }
 
   if (options.webDistDirectory) {
@@ -264,6 +369,25 @@ export function createApp(options: AppOptions = {}): Express {
       response.status(404).json(apiError("not_found", error.message));
       return;
     }
+    if (error instanceof DocumentRequestError) {
+      const status =
+        error.code === "document_too_large"
+          ? 413
+          : error.code === "unsupported_document"
+            ? 415
+            : 400;
+      response.status(status).json(apiError(error.code, error.message));
+      return;
+    }
+    if (error instanceof DuplicateDocumentError) {
+      response.status(409).json(
+        apiError("duplicate_document", error.message, {
+          receiptId: error.receiptId,
+          documentId: error.documentId,
+        }),
+      );
+      return;
+    }
     if (error instanceof ConflictError) {
       response.status(409).json(apiError("conflict", error.message));
       return;
@@ -282,6 +406,10 @@ export function createApp(options: AppOptions = {}): Express {
   return app;
 }
 
-function apiError(code: ApiError["error"]["code"], message: string) {
-  return apiErrorSchema.parse({ error: { code, message } });
+function apiError(
+  code: ApiError["error"]["code"],
+  message: string,
+  details?: unknown,
+) {
+  return apiErrorSchema.parse({ error: { code, message, details } });
 }

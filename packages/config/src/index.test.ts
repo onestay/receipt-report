@@ -48,6 +48,13 @@ describe("configuration", () => {
     expect(() =>
       parseApiConfig({ ...shared, DOCUMENT_MAX_BYTES: "0" }),
     ).toThrow();
+    expect(() =>
+      parseApiConfig({
+        ...shared,
+        DOCUMENT_MAX_BYTES: "1024",
+        DOCUMENT_MAX_REQUEST_BYTES: "1024",
+      }),
+    ).toThrow();
   });
 
   it("rejects overlap with a relative SQLite URL", () => {

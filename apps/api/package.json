@@ -14,10 +14,13 @@
     "@receipt-report/config": "workspace:*",
     "@receipt-report/contracts": "workspace:*",
     "@receipt-report/database": "workspace:*",
+    "busboy": "1.6.0",
     "express": "5.2.1",
+    "file-type": "21.3.0",
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "@types/busboy": "1.5.4",
     "@types/express": "5.0.6",
     "@types/supertest": "6.0.3",
     "supertest": "7.2.2"

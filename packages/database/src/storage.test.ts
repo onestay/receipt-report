@@ -1,14 +1,19 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDatabase, type Database } from "./index.js";
 import {
   FilesystemDocumentStorage,
+  DocumentStorageLimitError,
+  EmptyDocumentError,
   normalizedPagePath,
   originalDocumentPath,
   persistOriginalDocument,
+  replacementOriginalDocumentPath,
 } from "./storage.js";
 
 let directory = "";
@@ -77,6 +82,54 @@ describe("filesystem document storage", () => {
       "already exists",
     );
     expect([...(await storage.read(target))]).toEqual([1]);
+  });
+
+  it("streams bounded staging while hashing and supports bounded reads", async () => {
+    const bytes = Buffer.from("synthetic-stream");
+    const staged = await storage.stageStream(
+      Readable.from([bytes.subarray(0, 4), bytes.subarray(4)]),
+      bytes.length,
+    );
+    expect(staged).toEqual({
+      relativePath: expect.stringMatching(/^staging\//),
+      byteSize: bytes.length,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+    });
+    expect(await storage.readHead(staged.relativePath, 4)).toEqual(
+      Buffer.from("synt"),
+    );
+    expect(await storage.readAt(staged.relativePath, 4, 5)).toEqual(
+      Buffer.from("hetic"),
+    );
+    const streamed: Buffer[] = [];
+    for await (const chunk of storage.createReadStream(staged.relativePath, {
+      highWaterMark: 3,
+    }))
+      streamed.push(Buffer.from(chunk));
+    expect(Buffer.concat(streamed)).toEqual(bytes);
+  });
+
+  it("cleans empty and over-limit staged streams", async () => {
+    await expect(
+      storage.stageStream(Readable.from([]), 1),
+    ).rejects.toBeInstanceOf(EmptyDocumentError);
+    await expect(
+      storage.stageStream(Readable.from([Buffer.from("too large")]), 2),
+    ).rejects.toBeInstanceOf(DocumentStorageLimitError);
+    await storage.initialize();
+    expect(await readdir(join(storage.root, "staging"))).toEqual([]);
+  });
+
+  it("builds safe revision paths", () => {
+    expect(replacementOriginalDocumentPath("doc_1", ".JPG", "rev_2")).toBe(
+      "originals/doc_1/original-rev_2.jpg",
+    );
+    expect(() =>
+      replacementOriginalDocumentPath("doc_1", "jpg", "../escape"),
+    ).toThrow("Invalid storage path segment");
+    expect(() => originalDocumentPath("doc", "exe")).toThrow(
+      "Unsupported document extension",
+    );
   });
 });
 
