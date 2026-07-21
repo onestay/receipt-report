@@ -38,7 +38,10 @@ script engine or external resource loader is invoked, and the Compose worker has
 networking disabled.
 
 Sharp and the Poppler/util-linux packages exist only in the worker build and
-runtime stages. The API and migration stages contain neither Sharp nor Poppler.
+runtime stages. The API and migration stages contain neither Sharp nor Poppler,
+and the API and worker run as the unprivileged `node` user. The one-shot
+migration service uses root only to initialize and hand off the named data
+volume before either long-lived process starts.
 The Debian base tag, pnpm lockfile, runtime renderer identity, and versioned
 profile jointly make output provenance explicit; security-patched Debian package
 revisions may advance on image rebuild without silently masquerading as the same

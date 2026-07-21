@@ -143,7 +143,9 @@ writers before copying the complete volume (including SQLite WAL sidecars), and
 restore the database and document tree together. The API and worker both need
 write access: the API will stage/promote originals, while the worker publishes
 derived pages. The migration container needs the database but does not receive
-`STORAGE_PATH` or access document paths through application code.
+`STORAGE_PATH` or access document paths through application code. It briefly
+runs as root only to initialize the named volume and hand its ownership to the
+unprivileged application user; API and worker runtimes run as `node`.
 
 The worker runtime alone contains Sharp/libvips and Poppler. Poppler runs as a
 separate process under address-space, CPU-time, wall-time, output-size, page,
