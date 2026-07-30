@@ -95,3 +95,12 @@ standalone category, historical direct assignments remain intact while that
 parent stops accepting new ones; it becomes assignable again if its last child
 moves away or is deleted. Archiving a parent disables its subtree without
 overwriting each child's independent archive state.
+
+The web app includes a category-management screen for editing this hierarchy.
+It uses explicit `Parent → Child` labels, permits only legal two-level moves,
+explains restrictive deletion conflicts, and keeps archived historical
+assignments understandable. Receipt line items use grouped native category
+selectors with keyboard type-ahead. Several lines can be selected for one local
+bulk edit; the existing atomic receipt save persists the complete result.
+Creating a category from the receipt editor saves it independently and never
+discards unsaved receipt fields.

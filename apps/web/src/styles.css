@@ -18,6 +18,120 @@
   --line: rgb(23 37 28 / 13%);
   --shadow: 0 1.2rem 4rem rgb(31 57 39 / 10%);
 }
+
+.category-page {
+  max-width: 64rem;
+  margin: 0 auto;
+}
+
+.category-create,
+.category-row,
+.category-tools,
+.bulk-category,
+.category-row__fields,
+.category-actions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: end;
+  flex-wrap: wrap;
+}
+
+.category-create {
+  margin: 1.5rem 0;
+}
+
+.category-create h2 {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.category-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.category-row {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.category-row > div:first-child {
+  min-width: 13rem;
+  flex: 1;
+}
+
+.category-row strong,
+.category-row small {
+  display: block;
+}
+
+.category-row__fields {
+  flex: 2;
+}
+
+.category-row__fields label {
+  min-width: 10rem;
+  flex: 1;
+}
+
+.category-row__fields span {
+  display: block;
+  font-size: 0.75rem;
+}
+
+.category-actions {
+  align-items: center;
+}
+
+.category-tools {
+  margin-bottom: 1rem;
+  display: block;
+}
+
+.bulk-category {
+  align-items: center;
+}
+
+.bulk-category > label {
+  flex-basis: 100%;
+}
+
+.bulk-category select {
+  min-width: 0;
+  flex: 1 1 12rem;
+}
+
+.category-tools,
+.category-tools details,
+.category-tools .inline-create {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.category-tools details {
+  margin-top: 0.75rem;
+}
+
+.item-select {
+  display: inline-flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+@media (max-width: 44rem) {
+  .category-row {
+    align-items: stretch;
+  }
+
+  .category-row > div,
+  .category-row__fields {
+    flex-basis: 100%;
+  }
+
+  .category-actions {
+    justify-content: flex-start;
+  }
+}
 * {
   box-sizing: border-box;
 }
@@ -36,6 +150,7 @@ button,
 input,
 textarea,
 select {
+  max-width: 100%;
   font: inherit;
 }
 a {
@@ -411,6 +526,12 @@ code {
   .masthead nav > a:first-child {
     display: none;
   }
+  .masthead nav {
+    gap: 0.65rem;
+  }
+  .masthead nav .button {
+    padding-inline: 0.75rem;
+  }
   .page {
     padding-top: 2.5rem;
   }
@@ -441,6 +562,12 @@ code {
   }
   .form-actions > * {
     flex: 1;
+  }
+}
+
+@media (max-width: 380px) {
+  .brand strong {
+    display: none;
   }
 }
 @media (prefers-reduced-motion: reduce) {

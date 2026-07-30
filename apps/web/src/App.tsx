@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
   apiErrorSchema,
+  categorySchema,
   merchantBrandListSchema,
   merchantBrandSchema,
   merchantStoreListSchema,
@@ -11,9 +12,16 @@ import {
   receiptListSchema,
   type MerchantBrand,
   type MerchantStore,
+  type Category,
   type ReceiptDetail,
   type ReceiptSummary,
 } from "@receipt-report/contracts";
+import {
+  CategoryManager,
+  CategoryOptions,
+  categoryLabel,
+  loadCategories,
+} from "./Categories.js";
 import {
   DocumentFileField,
   DocumentPanel,
@@ -22,7 +30,7 @@ import {
   uploadReceiptDocument,
 } from "./DocumentPanel.js";
 
-type Route = { page: "list" | "new" | "detail"; id?: string };
+type Route = { page: "list" | "new" | "detail" | "categories"; id?: string };
 const money = new Intl.NumberFormat("de-DE", {
   style: "currency",
   currency: "EUR",
@@ -31,6 +39,7 @@ let navigationGuard: (() => boolean) | undefined;
 let ignoreNextPop = false;
 
 function route(): Route {
+  if (location.pathname === "/categories") return { page: "categories" };
   if (location.pathname === "/receipts/new") return { page: "new" };
   const match = location.pathname.match(/^\/receipts\/([^/]+)$/);
   return match?.[1] ? { page: "detail", id: match[1] } : { page: "list" };
@@ -88,7 +97,7 @@ export function App() {
     return () => window.removeEventListener("popstate", update);
   }, []);
   useEffect(() => {
-    document.title = `${current.page === "list" ? "Ledger" : current.page === "new" ? "New receipt" : "Receipt detail"} · Receipt Report`;
+    document.title = `${current.page === "list" ? "Ledger" : current.page === "new" ? "New receipt" : current.page === "categories" ? "Categories" : "Receipt detail"} · Receipt Report`;
     const main = document.querySelector("main");
     const heading = document.querySelector<HTMLElement>("main h1");
     if (heading && !main?.contains(document.activeElement)) {
@@ -108,6 +117,7 @@ export function App() {
         </Link>
         <nav aria-label="Primary">
           <Link href="/receipts">Ledger</Link>
+          <Link href="/categories">Categories</Link>
           <Link href="/receipts/new" className="button button--small">
             New receipt
           </Link>
@@ -119,6 +129,7 @@ export function App() {
         {current.page === "detail" && current.id && (
           <ReceiptEditor id={current.id} />
         )}
+        {current.page === "categories" && <CategoryManager />}
       </main>
       <footer>Quietly kept on your own server.</footer>
     </div>
@@ -961,6 +972,7 @@ type EditorItem = {
   quantity: string;
   unitPrice: string;
   lineTotal: string;
+  categoryId?: string | null;
 };
 type EditorValues = {
   merchantRaw: string;
@@ -992,6 +1004,7 @@ function editorValues(receipt: ReceiptDetail): EditorValues {
       quantity: quantityInput(item.quantityMilli ?? null),
       unitPrice: centsInput(item.unitPriceCents ?? null),
       lineTotal: centsInput(item.lineTotalCents),
+      categoryId: item.categoryId,
     })),
   };
 }
@@ -1030,6 +1043,14 @@ function ReceiptEditor({ id }: { id: string }) {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [categoryError, setCategoryError] = useState("");
+  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  const [bulkCategoryId, setBulkCategoryId] = useState("");
+  const [bulkCategoryChosen, setBulkCategoryChosen] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [newCategoryParentId, setNewCategoryParentId] = useState("");
+  const [creatingCategory, setCreatingCategory] = useState(false);
   const dirty = JSON.stringify(values) !== JSON.stringify(saved);
   const load = useCallback(async () => {
     setLoadState("loading");
@@ -1052,6 +1073,17 @@ function ReceiptEditor({ id }: { id: string }) {
   useEffect(() => {
     void load();
   }, [load]);
+  const refreshCategories = useCallback(async () => {
+    try {
+      setCategories(await loadCategories());
+      setCategoryError("");
+    } catch {
+      setCategoryError(
+        "Categories could not be loaded. Existing receipt edits are unchanged.",
+      );
+    }
+  }, []);
+  useEffect(() => void refreshCategories(), [refreshCategories]);
   useEffect(() => {
     navigationGuard = dirty
       ? () => window.confirm("Discard your unsaved changes?")
@@ -1097,7 +1129,7 @@ function ReceiptEditor({ id }: { id: string }) {
   const updateItem = (
     index: number,
     field: keyof Omit<EditorItem, "key">,
-    value: string,
+    value: string | null,
   ) =>
     update(
       "items",
@@ -1134,7 +1166,14 @@ function ReceiptEditor({ id }: { id: string }) {
     const key = `new-${crypto.randomUUID()}`;
     update("items", [
       ...values.items,
-      { key, description: "", quantity: "", unitPrice: "", lineTotal: "" },
+      {
+        key,
+        description: "",
+        quantity: "",
+        unitPrice: "",
+        lineTotal: "",
+        categoryId: null,
+      },
     ]);
     requestAnimationFrame(() =>
       document.getElementById(`item-${key}-description`)?.focus(),
@@ -1166,6 +1205,7 @@ function ReceiptEditor({ id }: { id: string }) {
         quantityMilli: quantity,
         unitPriceCents: unitPrice,
         lineTotalCents: lineTotal ?? 0,
+        categoryId: item.categoryId ?? null,
       };
     });
     setErrors(nextErrors);
@@ -1217,6 +1257,56 @@ function ReceiptEditor({ id }: { id: string }) {
         "Could not delete the receipt. Nothing was removed; try again.",
       );
     }
+  }
+  async function createCategory() {
+    const name = newCategoryName.trim();
+    if (!name) {
+      setCategoryError("Enter a category name.");
+      return;
+    }
+    setCreatingCategory(true);
+    setCategoryError("");
+    try {
+      const response = await fetch("/api/v1/categories", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name,
+          parentId: newCategoryParentId || null,
+        }),
+      });
+      if (!response.ok) throw new Error("create");
+      const created = categorySchema.parse(await response.json());
+      await refreshCategories();
+      setNewCategoryName("");
+      setNewCategoryParentId("");
+      if (created.isAssignable) {
+        setBulkCategoryId(created.id);
+        setBulkCategoryChosen(true);
+      }
+      setStatus(
+        "Category created independently; your receipt edits are unchanged.",
+      );
+    } catch {
+      setCategoryError(
+        "The category could not be created. Your receipt edits are unchanged; try again.",
+      );
+    } finally {
+      setCreatingCategory(false);
+    }
+  }
+  function applyBulkCategory() {
+    setValues((current) => ({
+      ...current,
+      items: current.items.map((item) =>
+        selectedItems.has(item.key)
+          ? { ...item, categoryId: bulkCategoryId || null }
+          : item,
+      ),
+    }));
+    setStatus(
+      `Updated ${selectedItems.size} selected ${selectedItems.size === 1 ? "item" : "items"} locally. Save the receipt to keep the change.`,
+    );
   }
   const sum = lineTotalSum(values);
   const enteredTotal = parseMoney(values.total);
@@ -1319,6 +1409,94 @@ function ReceiptEditor({ id }: { id: string }) {
                 + Add item
               </button>
             </div>
+            {categoryError && (
+              <div className="inline-error" role="alert">
+                {categoryError}{" "}
+                <button type="button" onClick={() => void refreshCategories()}>
+                  Try again
+                </button>
+              </div>
+            )}
+            <div className="panel category-tools">
+              <div className="bulk-category">
+                <label htmlFor="bulk-category">
+                  Category for selected items
+                </label>
+                <select
+                  id="bulk-category"
+                  value={bulkCategoryId}
+                  onChange={(event) => {
+                    setBulkCategoryId(event.target.value);
+                    setBulkCategoryChosen(true);
+                  }}
+                >
+                  {!bulkCategoryChosen && (
+                    <option value="" disabled>
+                      Choose a category…
+                    </option>
+                  )}
+                  <CategoryOptions
+                    categories={categories}
+                    value={bulkCategoryId || null}
+                  />
+                </select>
+                <button
+                  type="button"
+                  className="button button--small"
+                  disabled={selectedItems.size === 0 || !bulkCategoryChosen}
+                  onClick={applyBulkCategory}
+                >
+                  Apply to {selectedItems.size || "selected"}
+                </button>
+              </div>
+              <details>
+                <summary>
+                  Create a category without losing receipt edits
+                </summary>
+                <div className="inline-create">
+                  <div className="field">
+                    <label htmlFor="receipt-new-category">Name</label>
+                    <input
+                      id="receipt-new-category"
+                      value={newCategoryName}
+                      onChange={(event) =>
+                        setNewCategoryName(event.target.value)
+                      }
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="receipt-new-category-parent">Parent</label>
+                    <select
+                      id="receipt-new-category-parent"
+                      value={newCategoryParentId}
+                      onChange={(event) =>
+                        setNewCategoryParentId(event.target.value)
+                      }
+                    >
+                      <option value="">Top level</option>
+                      {categories
+                        .filter(
+                          ({ parentId, archivedAt }) =>
+                            parentId === null && !archivedAt,
+                        )
+                        .map((category) => (
+                          <option key={category.id} value={category.id}>
+                            {category.name}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    className="button button--small"
+                    disabled={creatingCategory}
+                    onClick={() => void createCategory()}
+                  >
+                    {creatingCategory ? "Creating…" : "Create category"}
+                  </button>
+                </div>
+              </details>
+            </div>
             {values.items.length === 0 && (
               <div className="panel state">
                 <p>No line items yet.</p>
@@ -1327,7 +1505,21 @@ function ReceiptEditor({ id }: { id: string }) {
             {values.items.map((item, index) => (
               <article className="panel item" key={item.key}>
                 <div className="item-title">
-                  <strong>Item {index + 1}</strong>
+                  <label className="item-select">
+                    <input
+                      type="checkbox"
+                      checked={selectedItems.has(item.key)}
+                      onChange={(event) =>
+                        setSelectedItems((current) => {
+                          const next = new Set(current);
+                          if (event.target.checked) next.add(item.key);
+                          else next.delete(item.key);
+                          return next;
+                        })
+                      }
+                    />
+                    <strong>Item {index + 1}</strong>
+                  </label>
                   <div>
                     <button
                       aria-label={`Move item ${index + 1} up`}
@@ -1362,6 +1554,63 @@ function ReceiptEditor({ id }: { id: string }) {
                       updateItem(index, "description", value)
                     }
                   />
+                  <div className="field field--wide">
+                    <label htmlFor={`item-${item.key}-category`}>
+                      Category
+                    </label>
+                    <select
+                      id={`item-${item.key}-category`}
+                      value={item.categoryId ?? ""}
+                      title={
+                        item.categoryId
+                          ? categoryLabel(
+                              // Defensive fallback for a stale category-list
+                              // response; referenced categories cannot normally
+                              // be deleted by the API.
+                              categories.find(
+                                ({ id }) => id === item.categoryId,
+                              ) ??
+                                ({
+                                  id: item.categoryId,
+                                  name: "Assigned category",
+                                  parentId: null,
+                                } as Category),
+                              categories,
+                            )
+                          : "Uncategorized"
+                      }
+                      onKeyDown={(event) => {
+                        if (
+                          event.ctrlKey &&
+                          (event.key === "ArrowDown" || event.key === "ArrowUp")
+                        ) {
+                          event.preventDefault();
+                          const target =
+                            index + (event.key === "ArrowDown" ? 1 : -1);
+                          document
+                            .getElementById(
+                              `item-${values.items[target]?.key ?? ""}-category`,
+                            )
+                            ?.focus();
+                        }
+                      }}
+                      onChange={(event) =>
+                        updateItem(
+                          index,
+                          "categoryId",
+                          event.target.value || null,
+                        )
+                      }
+                    >
+                      <CategoryOptions
+                        categories={categories}
+                        value={item.categoryId ?? null}
+                      />
+                    </select>
+                    <small>
+                      Use Ctrl + ↑/↓ to move between category controls.
+                    </small>
+                  </div>
                   <EditorField
                     label="Quantity"
                     id={`item-${item.key}-quantity`}

@@ -161,6 +161,13 @@ schema migration:
 - Electronics
 - Other
 
+The manual receipt workflow presents assignable children grouped by their
+parent and standalone top-level leaves directly. `Uncategorized` represents a
+null assignment, not a category row. An archived or formerly standalone parent
+may remain visible on a historical line while being disabled for new
+assignments. Bulk changes stay local until the whole receipt is saved, so a
+failed save preserves every category and field edit together.
+
 ## Processing attempt
 
 - Receipt, document, and page references

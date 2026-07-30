@@ -43,6 +43,10 @@ function stubAppFetch(
     const url = String(input);
     if (url === "/api/v1/document-upload-configuration")
       return Promise.resolve(new Response(JSON.stringify(uploadConfiguration)));
+    if (url === "/api/v1/categories?includeArchived=true")
+      return Promise.resolve(
+        new Response(JSON.stringify({ categories: [] }), { status: 200 }),
+      );
     if (/\/api\/v1\/receipts\/[^/]+\/document$/.test(url) && !init?.method)
       return Promise.resolve(new Response(null, { status: 404 }));
     return receiptFetch(input, init);
@@ -769,6 +773,115 @@ describe("receipt editor", () => {
     finishSave?.(new Response(JSON.stringify(receipt), { status: 200 }));
     await waitFor(() => expect(button).toHaveAttribute("aria-busy", "false"));
     expect(button).toBeDisabled();
+  });
+  it("bulk assigns categories, moves focus, and preserves edits through in-context creation", async () => {
+    history.replaceState({}, "", `/receipts/${receipt.id}`);
+    const parentId = "cm42345678901234567890123";
+    const childId = "cm52345678901234567890123";
+    const categories = [
+      {
+        id: parentId,
+        name: "Food",
+        normalizedName: "food",
+        parentId: null,
+        position: 0,
+        archivedAt: null,
+        isLeaf: false,
+        isEffectivelyActive: true,
+        isAssignable: false,
+        createdAt: "2026-07-30T00:00:00.000Z",
+        updatedAt: "2026-07-30T00:00:00.000Z",
+      },
+      {
+        id: childId,
+        name: "Bakery",
+        normalizedName: "bakery",
+        parentId,
+        position: 0,
+        archivedAt: null,
+        isLeaf: true,
+        isEffectivelyActive: true,
+        isAssignable: true,
+        createdAt: "2026-07-30T00:00:00.000Z",
+        updatedAt: "2026-07-30T00:00:00.000Z",
+      },
+    ];
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === `/api/v1/receipts/${receipt.id}` && !init?.method)
+          return new Response(JSON.stringify(receipt));
+        if (url === "/api/v1/categories?includeArchived=true")
+          return new Response(JSON.stringify({ categories }));
+        if (url === "/api/v1/categories" && init?.method === "POST")
+          return new Response(JSON.stringify(categories[1]), { status: 201 });
+        if (url === "/api/v1/document-upload-configuration")
+          return new Response(JSON.stringify(uploadConfiguration));
+        if (/\/document$/.test(url)) return new Response(null, { status: 404 });
+        if (init?.method === "PATCH")
+          return new Response(JSON.stringify(receipt), { status: 500 });
+        throw new Error(`Unexpected request: ${url}`);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    await screen.findByRole("heading", { name: "Edit receipt" });
+    await waitFor(() =>
+      expect(
+        screen.getAllByLabelText("Category", { selector: "select" }),
+      ).toHaveLength(2),
+    );
+    const controls = screen.getAllByLabelText("Category", {
+      selector: "select",
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Item 1" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Item 2" }));
+    expect(screen.getByRole("button", { name: "Apply to 2" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Category for selected items"), {
+      target: { value: childId },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Apply to 2" }));
+    expect(controls[0]).toHaveValue(childId);
+    expect(controls[1]).toHaveValue(childId);
+    controls[0]?.focus();
+    fireEvent.keyDown(controls[0] as HTMLElement, {
+      key: "ArrowDown",
+      ctrlKey: true,
+    });
+    expect(controls[1]).toHaveFocus();
+    controls[0]?.focus();
+    fireEvent.keyDown(controls[0] as HTMLElement, {
+      key: "ArrowDown",
+      altKey: true,
+    });
+    expect(controls[0]).toHaveFocus();
+
+    fireEvent.click(
+      screen.getByText("Create a category without losing receipt edits"),
+    );
+    fireEvent.change(
+      screen.getByLabelText("Name", { selector: "#receipt-new-category" }),
+      {
+        target: { value: "New bakery" },
+      },
+    );
+    fireEvent.change(
+      screen.getByLabelText("Parent", {
+        selector: "#receipt-new-category-parent",
+      }),
+      { target: { value: parentId } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Create category" }));
+    expect(
+      await screen.findByText(/Category created independently/),
+    ).toBeInTheDocument();
+    expect(controls[0]).toHaveValue(childId);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(
+      await screen.findByText(/Could not save. Your changes are still here/),
+    ).toBeInTheDocument();
+    expect(controls[0]).toHaveValue(childId);
   });
   it("clears the busy state and re-enables saving after failure", async () => {
     history.replaceState({}, "", `/receipts/${receipt.id}`);
