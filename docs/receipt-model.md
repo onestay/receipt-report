@@ -107,7 +107,7 @@ when normalization fails.
 - Quantity and unit when present
 - Unit price and line total
 - Discount or deposit semantics when applicable
-- Category and optional subcategory
+- One optional stable category identifier
 - Model confidence or warnings
 - User-correction state
 
@@ -126,6 +126,41 @@ The manual editor treats the explicit receipt total and the integer sum of line
 totals as separate user-entered values. A discrepancy is visible but does not
 block saving, and quantity or unit price never derives or validates a line total.
 
+## Spending category
+
+A category has a stable identifier, editable display name, deterministic
+normalized name, optional parent, sibling position, and optional archive
+timestamp. The hierarchy is deliberately limited to top-level categories and
+their direct children. Sibling names remain unique after normalization even
+while archived, and positions are contiguous within each sibling set.
+
+Leaf state is derived from the current child count rather than stored. Only an
+effectively active leaf accepts a new line-item assignment: both the row and its
+parent, if any, must be unarchived. Adding a first child leaves historical direct
+assignments untouched but blocks new assignments to that parent. Removing or
+moving away the final child makes it assignable again.
+
+Archive state is independent per row. Archiving a parent disables its subtree
+without changing child timestamps; restoring the parent re-enables children
+that were not separately archived. A child cannot be restored while its parent
+is archived. Deletion is restrictive for categories with children or line-item
+references.
+
+Fresh databases receive this ordinary, fully mutable taxonomy once through the
+schema migration:
+
+- Food → Fruit & vegetables, Meat & fish, Dairy & eggs, Bakery, Pantry &
+  cooking, Snacks & sweets, Drinks, Alcohol
+- Household → Cleaning, Paper goods, Home & kitchen supplies
+- Personal care → Hygiene, Cosmetics, Hair care
+- Eating out
+- Health
+- Pets
+- Baby
+- Clothing
+- Electronics
+- Other
+
 ## Processing attempt
 
 - Receipt, document, and page references
@@ -137,26 +172,10 @@ block saving, and quantity or unit price never derives or validates a line total
 
 ## Categorization rule
 
-A correction may create a reusable mapping from merchant and normalized receipt
-text to a preferred product name and category. Explicit user choices override
-model predictions.
-
-## Initial category direction
-
-- Groceries
-- Drinks
-- Alcohol
-- Household
-- Personal care
-- Health
-- Pet
-- Baby
-- Clothing
-- Electronics
-- Other
-
-The exact taxonomy should be finalized in its own issue before being encoded in
-database migrations.
+Transparent category correction rules are deferred to issue #29. This taxonomy
+does not introduce product identity, preferred-product mappings, fuzzy matching,
+or automatic mutation of line-item assignments. Explicit user choices will
+continue to override later suggestions.
 
 ## German receipt considerations
 

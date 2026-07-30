@@ -729,6 +729,13 @@ describe("receipt editor", () => {
     fireEvent.change(itemTotal, { target: { value: "1,00" } });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const saveInit = fetchMock.mock.calls[1]?.[1] as RequestInit | undefined;
+    const savedBody = JSON.parse(String(saveInit?.body)) as {
+      lineItems: Record<string, unknown>[];
+    };
+    expect(savedBody.lineItems).toHaveLength(2);
+    expect(savedBody.lineItems[0]?.id).toBe(receipt.lineItems[1]?.id);
+    expect(savedBody.lineItems[1]).not.toHaveProperty("id");
     expect(screen.getByText("Receipt saved.")).toBeInTheDocument();
   });
   it("distinguishes unchanged, saving, and saved button states", async () => {

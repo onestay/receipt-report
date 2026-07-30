@@ -1161,6 +1161,7 @@ function ReceiptEditor({ id }: { id: string }) {
       if (item.unitPrice && unitPrice === null)
         nextErrors[`item-${index}-unitPrice`] = "Enter a valid amount.";
       return {
+        ...(item.key.startsWith("new-") ? {} : { id: item.key }),
         description: item.description.trim(),
         quantityMilli: quantity,
         unitPriceCents: unitPrice,

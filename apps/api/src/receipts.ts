@@ -75,6 +75,7 @@ function detail(record: ReceiptWithItems): ReceiptDetail {
       quantityMilli: item.quantityMilli,
       unitPriceCents: item.unitPriceCents,
       lineTotalCents: item.lineTotalCents,
+      categoryId: item.categoryId,
       position: item.position,
     })),
     createdAt: record.createdAt.toISOString(),
@@ -129,35 +130,103 @@ async function resolveMerchantLinks(
   return { merchantBrandId, merchantStoreId };
 }
 
-function itemData(item: ReceiptCreate["lineItems"][number], position: number) {
+type ReceiptItem = ReceiptCreate["lineItems"][number] & {
+  id?: string | undefined;
+};
+
+function itemData(item: ReceiptItem, position: number) {
   return {
+    ...(item.id === undefined ? {} : { id: item.id }),
     description: item.description,
     quantityMilli: item.quantityMilli ?? null,
     unitPriceCents: item.unitPriceCents ?? null,
     lineTotalCents: item.lineTotalCents,
+    categoryId: item.categoryId ?? null,
     position,
   };
+}
+
+/**
+ * Only effectively active leaves accept a new assignment. An existing line may
+ * keep its exact historical assignment after that category is archived or
+ * gains its first child.
+ */
+async function validateCategoryAssignments(
+  database: Prisma.TransactionClient,
+  items: ReceiptItem[],
+  existingAssignments = new Map<string, string | null>(),
+): Promise<void> {
+  const seenItemIds = new Set<string>();
+  for (const item of items) {
+    if (item.id === undefined) continue;
+    if (seenItemIds.has(item.id) || !existingAssignments.has(item.id)) {
+      throw new InvalidReferenceError(
+        "Line item id does not belong to this receipt",
+      );
+    }
+    seenItemIds.add(item.id);
+  }
+
+  const categoryIds = [
+    ...new Set(
+      items
+        .map((item) => item.categoryId)
+        .filter((id): id is string => id !== null && id !== undefined),
+    ),
+  ];
+  if (categoryIds.length === 0) return;
+  const categories = await database.category.findMany({
+    where: { id: { in: categoryIds } },
+    select: {
+      id: true,
+      archivedAt: true,
+      parent: { select: { archivedAt: true } },
+      _count: { select: { children: true } },
+    },
+  });
+  const byId = new Map(categories.map((record) => [record.id, record]));
+  for (const item of items) {
+    const categoryId = item.categoryId ?? null;
+    if (categoryId === null) continue;
+    const record = byId.get(categoryId);
+    const preserved =
+      item.id !== undefined && existingAssignments.get(item.id) === categoryId;
+    if (
+      !record ||
+      (!preserved &&
+        (record.archivedAt !== null ||
+          (record.parent?.archivedAt ?? null) !== null ||
+          record._count.children > 0))
+    ) {
+      throw new InvalidReferenceError(
+        "categoryId must reference an effectively active leaf category",
+      );
+    }
+  }
 }
 
 export class ReceiptRepository {
   public constructor(private readonly database: PrismaClient) {}
 
   async create(input: ReceiptCreate): Promise<ReceiptDetail> {
-    const links = await resolveMerchantLinks(this.database, input);
-    const record = await this.database.receipt.create({
-      data: {
-        merchantRaw: input.merchantRaw,
-        ...links,
-        purchaseDate: input.purchaseDate,
-        purchaseTime: input.purchaseTime ?? null,
-        currency: input.currency,
-        notes: input.notes || null,
-        totalCents: input.totalCents,
-        lineItems: {
-          create: input.lineItems.map(itemData),
+    const record = await this.database.$transaction(async (transaction) => {
+      const links = await resolveMerchantLinks(transaction, input);
+      await validateCategoryAssignments(transaction, input.lineItems);
+      return transaction.receipt.create({
+        data: {
+          merchantRaw: input.merchantRaw,
+          ...links,
+          purchaseDate: input.purchaseDate,
+          purchaseTime: input.purchaseTime ?? null,
+          currency: input.currency,
+          notes: input.notes || null,
+          totalCents: input.totalCents,
+          lineItems: {
+            create: input.lineItems.map(itemData),
+          },
         },
-      },
-      include: receiptInclude,
+        include: receiptInclude,
+      });
     });
     return detail(record);
   }
@@ -211,6 +280,9 @@ export class ReceiptRepository {
     const record = await this.database.$transaction(async (transaction) => {
       const existing = await transaction.receipt.findUnique({
         where: { id },
+        include: {
+          lineItems: { select: { id: true, categoryId: true } },
+        },
       });
       if (!existing) throw new NotFoundError("Receipt not found");
       // Both link fields travel together or not at all, so canonical identity
@@ -220,6 +292,11 @@ export class ReceiptRepository {
           ? await resolveMerchantLinks(transaction, input)
           : {};
       if (input.lineItems) {
+        await validateCategoryAssignments(
+          transaction,
+          input.lineItems,
+          new Map(existing.lineItems.map((item) => [item.id, item.categoryId])),
+        );
         await transaction.lineItem.deleteMany({ where: { receiptId: id } });
       }
       return transaction.receipt.update({

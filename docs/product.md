@@ -81,3 +81,17 @@ navigation. Upload cancellation, duplicate-document links, explicit
 replace/remove confirmations, failed-normalization retry, page loading failures,
 and the operator-configured upload limit are visible without exposing internal
 storage paths.
+
+## Spending taxonomy
+
+The personal spending taxonomy has at most two levels: top-level categories and
+optional children. A fresh installation starts with useful Food, Household,
+Personal care, and standalone spending groups, but every starter is an ordinary
+record the user may rename, move, archive, or delete when unused.
+
+One receipt line may point to one category or remain uncategorized. New
+assignments target active leaves only. If a child is added beneath a formerly
+standalone category, historical direct assignments remain intact while that
+parent stops accepting new ones; it becomes assignable again if its last child
+moves away or is deleted. Archiving a parent disables its subtree without
+overwriting each child's independent archive state.

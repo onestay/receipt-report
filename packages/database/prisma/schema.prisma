@@ -136,10 +136,32 @@ model DocumentFileCleanup {
   updatedAt    DateTime @updatedAt
 }
 
+/// One node in the user's editable, maximum-two-level spending taxonomy.
+model Category {
+  id             String     @id @default(cuid())
+  name           String
+  normalizedName String
+  parentId       String?
+  parent         Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children       Category[] @relation("CategoryHierarchy")
+  position       Int
+  archivedAt     DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  lineItems      LineItem[]
+
+  // SQLite expression indexes in the migration enforce sibling uniqueness for
+  // both nullable top-level parent IDs and ordinary child parent IDs.
+  @@index([parentId, normalizedName])
+  @@index([parentId, position, id])
+}
+
 model LineItem {
-  id             String  @id @default(cuid())
+  id             String    @id @default(cuid())
   receiptId      String
-  receipt        Receipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  receipt        Receipt   @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  categoryId     String?
+  category       Category? @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   description    String
   quantityMilli  Int?
   unitPriceCents Int?
@@ -148,4 +170,5 @@ model LineItem {
 
   @@unique([receiptId, position])
   @@index([receiptId])
+  @@index([categoryId])
 }

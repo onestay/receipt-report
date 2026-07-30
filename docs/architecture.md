@@ -59,6 +59,7 @@ Versioned REST resources are flat rather than nested:
 | Resource                                | Purpose                                             |
 | --------------------------------------- | --------------------------------------------------- |
 | `/api/v1/receipts`                      | Receipt CRUD and list                               |
+| `/api/v1/categories`                    | Spending-taxonomy lifecycle and deterministic order |
 | `/api/v1/merchant-brands`               | Canonical merchant brand CRUD and list              |
 | `/api/v1/merchant-stores`               | Store CRUD and list, filtered by `brandId`          |
 | `/api/v1/document-upload-configuration` | Active media-type and byte-size upload limits       |
@@ -78,6 +79,18 @@ Both merchant lists accept a trimmed display-name `query`, a `limit`, and a
 `cursor`, and are ordered by normalized name then stable ID so keyset
 pagination is deterministic. Receipt responses embed the linked brand and store
 so a client can render the raw label and its grouping without a request per row.
+
+Categories are a flat REST resource whose responses expose the parent ID and
+derived leaf, effective-activity, and assignability state. The list is emitted
+as each top-level category followed by its children, using sibling position and
+stable ID as deterministic tie-breakers. Active rows are returned by default;
+`includeArchived=true` includes independently and effectively archived rows.
+Create appends within its sibling set. `PATCH /api/v1/categories/:id` renames or
+moves one row, with an optional destination position; `PUT
+/api/v1/categories/reorder` restates one complete sibling order. Explicit
+archive and restore actions preserve independent child archive timestamps, and
+delete is restrictive. Receipt line items carry one nullable `categoryId`, and
+the API accepts new assignments only to effectively active leaves.
 
 The public error taxonomy is `validation_error`, `invalid_cursor`, `not_found`,
 `conflict`, document-ingestion errors, and `internal_error`. Document ingestion
@@ -101,11 +114,14 @@ ends when the first real deployment carries data worth preserving.
 
 SQLite is the primary database and should use WAL mode where deployment permits.
 The database and receipt document directory must be mountable and backable up
-together. Canonical merchant brands and stores live in the same SQLite database
-as receipts, so an existing backup or restore covers merchant identity with no
-additional step; a restore that predates a brand still referenced by a receipt
+together. Canonical merchant brands, stores, the editable category taxonomy,
+and line-item assignments live in the same SQLite database as receipts, so an
+existing backup or restore covers both grouping systems with no additional
+step. A restore that predates a brand or category still referenced by a receipt
 would fail its foreign key, so database and documents must be restored as one
-consistent set. Jobs begin as ordinary database records; no separate queue service is
+consistent set. Starter categories are inserted only by their schema migration;
+there is no startup seed or repair pass that could recreate a renamed or deleted
+row. Jobs begin as ordinary database records; no separate queue service is
 needed for the initial workload.
 
 Receipt document storage uses a dedicated absolute, non-root directory distinct

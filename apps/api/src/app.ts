@@ -4,6 +4,10 @@ import express, { type ErrorRequestHandler, type Express } from "express";
 import type { ApiConfig } from "@receipt-report/config";
 import {
   apiErrorSchema,
+  categoryCreateSchema,
+  categoryListQuerySchema,
+  categoryReorderSchema,
+  categoryUpdateSchema,
   documentUploadConfigurationSchema,
   healthResponseSchema,
   idSchema,
@@ -33,6 +37,7 @@ import {
   NotFoundError,
   prismaErrorCode,
 } from "./errors.js";
+import { CategoryRepository } from "./categories.js";
 import { DocumentRepository } from "./documents.js";
 import { MerchantRepository } from "./merchants.js";
 import { stageMultipartDocument } from "./multipart.js";
@@ -70,6 +75,80 @@ export function createApp(options: AppOptions = {}): Express {
   });
 
   if (options.database) {
+    const categories = new CategoryRepository(options.database);
+    app.get("/api/v1/categories", async (request, response, next) => {
+      try {
+        const query = categoryListQuerySchema.parse(request.query);
+        response.json(await categories.list(query.includeArchived));
+      } catch (error) {
+        next(error);
+      }
+    });
+    app.post("/api/v1/categories", async (request, response, next) => {
+      try {
+        response
+          .status(201)
+          .json(
+            await categories.create(categoryCreateSchema.parse(request.body)),
+          );
+      } catch (error) {
+        next(error);
+      }
+    });
+    app.put("/api/v1/categories/reorder", async (request, response, next) => {
+      try {
+        response.json(
+          await categories.reorder(categoryReorderSchema.parse(request.body)),
+        );
+      } catch (error) {
+        next(error);
+      }
+    });
+    app.patch("/api/v1/categories/:id", async (request, response, next) => {
+      try {
+        response.json(
+          await categories.update(
+            idSchema.parse(request.params.id),
+            categoryUpdateSchema.parse(request.body),
+          ),
+        );
+      } catch (error) {
+        next(error);
+      }
+    });
+    app.post(
+      "/api/v1/categories/:id/archive",
+      async (request, response, next) => {
+        try {
+          response.json(
+            await categories.archive(idSchema.parse(request.params.id)),
+          );
+        } catch (error) {
+          next(error);
+        }
+      },
+    );
+    app.post(
+      "/api/v1/categories/:id/restore",
+      async (request, response, next) => {
+        try {
+          response.json(
+            await categories.restore(idSchema.parse(request.params.id)),
+          );
+        } catch (error) {
+          next(error);
+        }
+      },
+    );
+    app.delete("/api/v1/categories/:id", async (request, response, next) => {
+      try {
+        await categories.delete(idSchema.parse(request.params.id));
+        response.status(204).end();
+      } catch (error) {
+        next(error);
+      }
+    });
+
     const merchants = new MerchantRepository(options.database);
     app.get("/api/v1/merchant-brands", async (request, response, next) => {
       try {
