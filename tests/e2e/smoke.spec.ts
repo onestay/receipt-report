@@ -117,3 +117,56 @@ test("assigns a receipt to one of two stores and restores it", async ({
   await expect(page.getByLabel("Brand")).toHaveValue(brand.id);
   await expect(page.getByLabel("Store")).toHaveValue(secondStore.id);
 });
+
+test("creates a category hierarchy and bulk assigns receipt lines", async ({
+  page,
+  request,
+}) => {
+  const suffix = crypto.randomUUID().slice(0, 8);
+  const parentName = `Synthetic Food ${suffix}`;
+  const childName = `Synthetic Bakery ${suffix}`;
+
+  await page.goto("/categories");
+  await page.locator("#category-name").fill(parentName);
+  await page.getByRole("button", { name: "Create", exact: true }).click();
+  await expect(page.getByText("Category created.")).toBeVisible();
+  await page.locator("#category-name").fill(childName);
+  await page.locator("#category-parent").selectOption({ label: parentName });
+  await page.getByRole("button", { name: "Create", exact: true }).click();
+  await expect(page.getByText(`${parentName} → ${childName}`)).toBeVisible();
+
+  const receiptResponse = await request.post("/api/v1/receipts", {
+    data: {
+      merchantRaw: "Synthetic Category Markt",
+      purchaseDate: "2026-07-30",
+      totalCents: 300,
+      lineItems: [
+        { description: "Synthetic first", lineTotalCents: 100 },
+        { description: "Synthetic second", lineTotalCents: 200 },
+      ],
+    },
+  });
+  const receipt = (await receiptResponse.json()) as { id: string };
+  await page.goto(`/receipts/${receipt.id}`);
+  await page.getByRole("checkbox", { name: "Item 1" }).check();
+  await page.getByRole("checkbox", { name: "Item 2" }).check();
+  await page
+    .getByLabel("Category for selected items")
+    .selectOption({ label: `${parentName} → ${childName}` });
+  await page.getByRole("button", { name: "Apply to 2" }).click();
+  await expect(
+    page.getByLabel("Category", { exact: true }).first(),
+  ).not.toHaveValue("");
+  await expect(
+    page.getByLabel("Category", { exact: true }).nth(1),
+  ).not.toHaveValue("");
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText("Receipt saved.")).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByLabel("Category", { exact: true }).first(),
+  ).not.toHaveValue("");
+  await expect(
+    page.getByLabel("Category", { exact: true }).nth(1),
+  ).not.toHaveValue("");
+});

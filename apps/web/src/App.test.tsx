@@ -43,6 +43,10 @@ function stubAppFetch(
     const url = String(input);
     if (url === "/api/v1/document-upload-configuration")
       return Promise.resolve(new Response(JSON.stringify(uploadConfiguration)));
+    if (url === "/api/v1/categories?includeArchived=true")
+      return Promise.resolve(
+        new Response(JSON.stringify({ categories: [] }), { status: 200 }),
+      );
     if (/\/api\/v1\/receipts\/[^/]+\/document$/.test(url) && !init?.method)
       return Promise.resolve(new Response(null, { status: 404 }));
     return receiptFetch(input, init);
