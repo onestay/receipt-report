@@ -1,8 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { cp, copyFile, mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { PrismaClient } from "@prisma/client";
 import { afterEach, describe, expect, it } from "vitest";
 import { createDatabase, type Database } from "./index.js";
 
@@ -16,19 +15,27 @@ afterEach(async () => {
   directory = undefined;
 });
 
-async function executeMigrationSql(
-  client: PrismaClient,
-  migrationPath: string,
-): Promise<void> {
-  const sql = await readFile(migrationPath, "utf8");
-  const statements = sql
-    .replace(/^--.*$/gm, "")
-    .split(";")
-    .map((statement) => statement.trim())
-    .filter((statement) => statement.length > 0);
-  for (const statement of statements) {
-    await client.$executeRawUnsafe(statement);
-  }
+function deploy(databaseUrl: string, schemaPath?: string): void {
+  execFileSync(
+    "pnpm",
+    schemaPath
+      ? [
+          "--filter",
+          "@receipt-report/database",
+          "exec",
+          "prisma",
+          "migrate",
+          "deploy",
+          "--schema",
+          schemaPath,
+        ]
+      : ["--filter", "@receipt-report/database", "db:migrate:deploy"],
+    {
+      cwd: process.cwd(),
+      env: { ...process.env, DATABASE_URL: databaseUrl },
+      stdio: "pipe",
+    },
+  );
 }
 
 describe("category migration", () => {
@@ -37,38 +44,51 @@ describe("category migration", () => {
       join(tmpdir(), `receipt-report-category-upgrade-${process.pid}-`),
     );
     const databaseUrl = `file:${join(directory, "upgrade.db")}`;
-    const client = new PrismaClient({
-      datasources: { db: { url: databaseUrl } },
-    });
-    await client.$connect();
-    const migrationsDirectory = resolve("packages/database/prisma/migrations");
-    const migrationNames = (await readdir(migrationsDirectory))
+    const sourcePrismaDirectory = resolve("packages/database/prisma");
+    const sourceMigrationsDirectory = join(sourcePrismaDirectory, "migrations");
+    const testPrismaDirectory = join(directory, "prisma");
+    const testMigrationsDirectory = join(testPrismaDirectory, "migrations");
+    await mkdir(testMigrationsDirectory, { recursive: true });
+    await copyFile(
+      join(sourcePrismaDirectory, "schema.prisma"),
+      join(testPrismaDirectory, "schema.prisma"),
+    );
+    await copyFile(
+      join(sourceMigrationsDirectory, "migration_lock.toml"),
+      join(testMigrationsDirectory, "migration_lock.toml"),
+    );
+    const migrationNames = (await readdir(sourceMigrationsDirectory))
       .filter((name) => name < "20260730120000_category_taxonomy")
       .sort();
     for (const migrationName of migrationNames) {
-      await executeMigrationSql(
-        client,
-        join(migrationsDirectory, migrationName, "migration.sql"),
+      await cp(
+        join(sourceMigrationsDirectory, migrationName),
+        join(testMigrationsDirectory, migrationName),
+        { recursive: true },
       );
     }
-    await client.$executeRawUnsafe(
+    const testSchemaPath = join(testPrismaDirectory, "schema.prisma");
+    deploy(databaseUrl, testSchemaPath);
+    database = await createDatabase(databaseUrl);
+    await database.$executeRawUnsafe(
       `INSERT INTO "Receipt" ("id", "merchantRaw", "purchaseDate", "currency", "totalCents", "createdAt", "updatedAt")
        VALUES ('cm11111111111111111111111', 'Synthetic migration receipt', '2026-07-30', 'EUR', 123, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
     );
-    await client.$executeRawUnsafe(
+    await database.$executeRawUnsafe(
       `INSERT INTO "LineItem" ("id", "receiptId", "description", "lineTotalCents", "position")
        VALUES ('cm22222222222222222222222', 'cm11111111111111111111111', 'Synthetic preserved line', 123, 0)`,
     );
+    await database.$disconnect();
+    database = undefined;
 
-    await executeMigrationSql(
-      client,
-      join(
-        migrationsDirectory,
-        "20260730120000_category_taxonomy",
-        "migration.sql",
-      ),
+    await cp(
+      join(sourceMigrationsDirectory, "20260730120000_category_taxonomy"),
+      join(testMigrationsDirectory, "20260730120000_category_taxonomy"),
+      { recursive: true },
     );
-    const lines = await client.$queryRawUnsafe<
+    deploy(databaseUrl, testSchemaPath);
+    database = await createDatabase(databaseUrl);
+    const lines = await database.$queryRawUnsafe<
       { id: string; description: string; categoryId: string | null }[]
     >(
       `SELECT "id", "description", "categoryId" FROM "LineItem" WHERE "id" = 'cm22222222222222222222222'`,
@@ -80,15 +100,14 @@ describe("category migration", () => {
         categoryId: null,
       },
     ]);
-    const categories = await client.$queryRawUnsafe<{ count: bigint }[]>(
+    const categories = await database.$queryRawUnsafe<{ count: bigint }[]>(
       `SELECT COUNT(*) AS "count" FROM "Category"`,
     );
     expect(Number(categories[0]?.count)).toBe(24);
-    const foreignKeyFailures = await client.$queryRawUnsafe<unknown[]>(
+    const foreignKeyFailures = await database.$queryRawUnsafe<unknown[]>(
       "PRAGMA foreign_key_check",
     );
     expect(foreignKeyFailures).toEqual([]);
-    await client.$disconnect();
   });
 
   it("uses the migration ledger once so edited starter rows never reappear", async () => {
@@ -96,17 +115,7 @@ describe("category migration", () => {
       join(tmpdir(), `receipt-report-category-seed-${process.pid}-`),
     );
     const databaseUrl = `file:${join(directory, "seed.db")}`;
-    const deploy = () =>
-      execFileSync(
-        "pnpm",
-        ["--filter", "@receipt-report/database", "db:migrate:deploy"],
-        {
-          cwd: process.cwd(),
-          env: { ...process.env, DATABASE_URL: databaseUrl },
-          stdio: "pipe",
-        },
-      );
-    deploy();
+    deploy(databaseUrl);
     database = await createDatabase(databaseUrl);
     await database.category.update({
       where: { id: "cm00000000000000000000001" },
@@ -118,7 +127,7 @@ describe("category migration", () => {
     await database.$disconnect();
     database = undefined;
 
-    deploy();
+    deploy(databaseUrl);
     database = await createDatabase(databaseUrl);
     expect(await database.category.count()).toBe(23);
     expect(
