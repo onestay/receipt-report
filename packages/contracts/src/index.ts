@@ -20,20 +20,26 @@ const optionalTrimmedText = z
   .nullish();
 
 /**
- * Deterministic canonical form used for merchant uniqueness and lookup.
+ * Deterministic canonical form used for user-controlled names and lookup.
  *
  * Unicode NFC, trim, collapse internal Unicode whitespace to one ASCII space,
  * then lowercase with a pinned `de-DE` locale. `ß` is deliberately not equated
  * with `ss` and diacritics are deliberately preserved, so `Müller` and `Muller`
  * remain distinct merchants.
  */
-export function normalizeMerchantName(value: string): string {
+export function normalizeCanonicalName(value: string): string {
   return value
     .normalize("NFC")
     .trim()
     .replace(/\s+/gu, " ")
     .toLocaleLowerCase("de-DE");
 }
+
+/** Backwards-compatible domain alias for canonical merchant names. */
+export const normalizeMerchantName = normalizeCanonicalName;
+
+/** Category sibling uniqueness uses the same German canonical-name rules. */
+export const normalizeCategoryName = normalizeCanonicalName;
 
 /** Separator that cannot occur in user-entered address text. */
 const addressKeySeparator = "\u001F";
@@ -77,12 +83,20 @@ export const lineItemInputSchema = z
     quantityMilli: quantityMilliSchema.nullish(),
     unitPriceCents: euroCentsSchema.nullish(),
     lineTotalCents: euroCentsSchema,
+    categoryId: idSchema.nullish(),
   })
   .strict();
 
 export const lineItemSchema = lineItemInputSchema.extend({
   id: receiptIdSchema,
   position: z.number().int().nonnegative(),
+  categoryId: idSchema.nullable().default(null),
+});
+
+const lineItemUpdateInputSchema = lineItemInputSchema.extend({
+  // Existing item identity lets the API distinguish a preserved historical
+  // assignment from a new assignment when a category later stops being a leaf.
+  id: idSchema.optional(),
 });
 
 const merchantAddressInputSchema = {
@@ -164,6 +178,72 @@ export const merchantStoreListSchema = z.object({
   nextCursor: z.string().nullable(),
 });
 
+export const categoryCreateSchema = z
+  .object({
+    name: trimmedNonEmptyText,
+    parentId: idSchema.nullish(),
+  })
+  .strict();
+
+export const categoryUpdateSchema = z
+  .object({
+    name: trimmedNonEmptyText.optional(),
+    parentId: idSchema.nullable().optional(),
+    position: z.number().int().nonnegative().optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (Object.keys(value).length === 0) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "At least one field is required",
+      });
+    }
+    if (value.position !== undefined && !("parentId" in value)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["position"],
+        message: "parentId is required when position is set",
+      });
+    }
+  });
+
+export const categoryReorderSchema = z
+  .object({
+    parentId: idSchema.nullable(),
+    categoryIds: z.array(idSchema).min(1),
+  })
+  .strict()
+  .refine(
+    (value) => new Set(value.categoryIds).size === value.categoryIds.length,
+    { path: ["categoryIds"], message: "Category IDs must be unique" },
+  );
+
+export const categoryListQuerySchema = z.object({
+  includeArchived: z
+    .enum(["true", "false"])
+    .transform((value) => value === "true")
+    .default(false),
+});
+
+export const categorySchema = z.object({
+  id: idSchema,
+  name: z.string().min(1),
+  normalizedName: z.string().min(1),
+  parentId: idSchema.nullable(),
+  position: z.number().int().nonnegative(),
+  archivedAt: z.string().datetime().nullable(),
+  isLeaf: z.boolean(),
+  isEffectivelyActive: z.boolean(),
+  isAssignable: z.boolean(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+export const categoryListSchema = z.object({
+  categories: z.array(categorySchema),
+});
+
 /**
  * Canonical links a client sends alongside the raw label. A store always
  * carries its brand so the pair can be validated at the boundary rather than
@@ -219,7 +299,7 @@ export const receiptUpdateSchema = z
       .transform((value) => value.trim())
       .nullish(),
     totalCents: euroCentsSchema.optional(),
-    lineItems: z.array(lineItemInputSchema).optional(),
+    lineItems: z.array(lineItemUpdateInputSchema).optional(),
   })
   .strict()
   .refine(
@@ -396,6 +476,12 @@ export type MerchantListQuery = z.infer<typeof merchantListQuerySchema>;
 export type MerchantStoreListQuery = z.infer<
   typeof merchantStoreListQuerySchema
 >;
+export type CategoryCreate = z.infer<typeof categoryCreateSchema>;
+export type CategoryUpdate = z.infer<typeof categoryUpdateSchema>;
+export type CategoryReorder = z.infer<typeof categoryReorderSchema>;
+export type CategoryListQuery = z.infer<typeof categoryListQuerySchema>;
+export type Category = z.infer<typeof categorySchema>;
+export type CategoryList = z.infer<typeof categoryListSchema>;
 export type LineItemInput = z.infer<typeof lineItemInputSchema>;
 export type LineItem = z.infer<typeof lineItemSchema>;
 export type ReceiptCreate = z.infer<typeof receiptCreateSchema>;

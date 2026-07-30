@@ -43,7 +43,9 @@ working, verified state.
 
 - Build side-by-side document and extraction review
 - Highlight validation findings and uncertain fields
-- Add categories and correction rules
+- Add the editable two-level category persistence and API, then its management
+  and assignment UI
+- Add transparent category correction rules
 - Protect approved edits during reprocessing
 
 ## 6. Reporting

@@ -65,6 +65,11 @@ pnpm --filter @receipt-report/database db:migrate:deploy
 
 API and worker processes request SQLite WAL mode when they start. If the filesystem cannot provide WAL, they emit a warning and continue; network filesystems are not supported for the initial deployment.
 
+Before applying a migration to data you care about, stop API and worker writers
+and back up the SQLite database with its WAL sidecars (or the complete Compose
+volume). Category starters are a one-time migration data step: later deploys do
+not recreate starter rows that a user renamed or deleted.
+
 ## Docker Compose
 
 ```bash

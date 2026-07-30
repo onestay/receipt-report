@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  categoryCreateSchema,
+  categoryListQuerySchema,
+  categoryReorderSchema,
+  categorySchema,
+  categoryUpdateSchema,
   healthResponseSchema,
   merchantStoreCreateSchema,
   merchantStoreUpdateSchema,
   normalizeMerchantAddressKey,
+  normalizeCategoryName,
   normalizeMerchantName,
   receiptCreateSchema,
   receiptDateSchema,
@@ -121,6 +127,9 @@ describe("receipt contracts", () => {
       currency: "EUR",
       lineItems: [{ description: "Apfel" }],
     });
+    expect(receiptCreateSchema.parse(valid).lineItems[0]?.categoryId).toBe(
+      undefined,
+    );
   });
   it("accepts leap dates and nullable optional fields", () => {
     expect(
@@ -162,6 +171,101 @@ describe("receipt contracts", () => {
     expect(receiptUpdateSchema.parse({ lineItems: [] })).toEqual({
       lineItems: [],
     });
+  });
+});
+
+describe("category contracts", () => {
+  it("normalizes shared German canonical names", () => {
+    expect(normalizeCategoryName("  Obst  &\tGemüse  ")).toBe("obst & gemüse");
+    expect(normalizeCategoryName("Gemüse")).toBe(
+      normalizeCategoryName("Gemüse"),
+    );
+  });
+
+  it("accepts strict create, move, reorder, list, and response shapes", () => {
+    expect(
+      categoryCreateSchema.parse({ name: "  Produce ", parentId: brandId }),
+    ).toEqual({ name: "Produce", parentId: brandId });
+    expect(categoryUpdateSchema.parse({ parentId: null, position: 2 })).toEqual(
+      { parentId: null, position: 2 },
+    );
+    expect(
+      categoryReorderSchema.parse({
+        parentId: null,
+        categoryIds: [brandId, storeId],
+      }),
+    ).toEqual({
+      parentId: null,
+      categoryIds: [brandId, storeId],
+    });
+    expect(categoryListQuerySchema.parse({ includeArchived: "true" })).toEqual({
+      includeArchived: true,
+    });
+    expect(categoryListQuerySchema.parse({})).toEqual({
+      includeArchived: false,
+    });
+    expect(
+      categorySchema.parse({
+        id: brandId,
+        name: "Produce",
+        normalizedName: "produce",
+        parentId: null,
+        position: 0,
+        archivedAt: null,
+        isLeaf: true,
+        isEffectivelyActive: true,
+        isAssignable: true,
+        createdAt: "2026-07-30T00:00:00.000Z",
+        updatedAt: "2026-07-30T00:00:00.000Z",
+      }),
+    ).toMatchObject({ name: "Produce", isAssignable: true });
+  });
+
+  it("rejects ambiguous or malformed category operations", () => {
+    expect(categoryCreateSchema.safeParse({ name: " " }).success).toBe(false);
+    expect(
+      categoryCreateSchema.safeParse({ name: "X", extra: 1 }).success,
+    ).toBe(false);
+    expect(categoryUpdateSchema.safeParse({}).success).toBe(false);
+    expect(categoryUpdateSchema.safeParse({ position: 0 }).success).toBe(false);
+    expect(
+      categoryReorderSchema.safeParse({
+        parentId: null,
+        categoryIds: [brandId, brandId],
+      }).success,
+    ).toBe(false);
+    expect(
+      categoryListQuerySchema.safeParse({ includeArchived: "yes" }).success,
+    ).toBe(false);
+  });
+
+  it("accepts nullable line assignments and optional existing item identity", () => {
+    expect(
+      receiptCreateSchema.parse({
+        merchantRaw: "Synthetic",
+        purchaseDate: "2026-07-30",
+        totalCents: 1,
+        lineItems: [
+          {
+            description: "Apple",
+            lineTotalCents: 1,
+            categoryId: brandId,
+          },
+        ],
+      }).lineItems[0]?.categoryId,
+    ).toBe(brandId);
+    expect(
+      receiptUpdateSchema.parse({
+        lineItems: [
+          {
+            id: storeId,
+            description: "Apple",
+            lineTotalCents: 1,
+            categoryId: null,
+          },
+        ],
+      }).lineItems?.[0],
+    ).toMatchObject({ id: storeId, categoryId: null });
   });
 });
 
