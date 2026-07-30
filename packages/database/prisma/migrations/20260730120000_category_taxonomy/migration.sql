@@ -14,6 +14,8 @@ CREATE TABLE "Category" (
 -- Add the nullable category assignment without losing existing line-item data.
 PRAGMA defer_foreign_keys=ON;
 PRAGMA foreign_keys=OFF;
+DROP INDEX "LineItem_receiptId_position_key";
+DROP INDEX "LineItem_receiptId_idx";
 CREATE TABLE "new_LineItem" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "receiptId" TEXT NOT NULL,
