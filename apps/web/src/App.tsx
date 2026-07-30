@@ -1047,6 +1047,7 @@ function ReceiptEditor({ id }: { id: string }) {
   const [categoryError, setCategoryError] = useState("");
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [bulkCategoryId, setBulkCategoryId] = useState("");
+  const [bulkCategoryChosen, setBulkCategoryChosen] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newCategoryParentId, setNewCategoryParentId] = useState("");
   const [creatingCategory, setCreatingCategory] = useState(false);
@@ -1279,7 +1280,10 @@ function ReceiptEditor({ id }: { id: string }) {
       await refreshCategories();
       setNewCategoryName("");
       setNewCategoryParentId("");
-      if (created.isAssignable) setBulkCategoryId(created.id);
+      if (created.isAssignable) {
+        setBulkCategoryId(created.id);
+        setBulkCategoryChosen(true);
+      }
       setStatus(
         "Category created independently; your receipt edits are unchanged.",
       );
@@ -1421,8 +1425,16 @@ function ReceiptEditor({ id }: { id: string }) {
                 <select
                   id="bulk-category"
                   value={bulkCategoryId}
-                  onChange={(event) => setBulkCategoryId(event.target.value)}
+                  onChange={(event) => {
+                    setBulkCategoryId(event.target.value);
+                    setBulkCategoryChosen(true);
+                  }}
                 >
+                  {!bulkCategoryChosen && (
+                    <option value="" disabled>
+                      Choose a category…
+                    </option>
+                  )}
                   <CategoryOptions
                     categories={categories}
                     value={bulkCategoryId || null}
@@ -1431,7 +1443,7 @@ function ReceiptEditor({ id }: { id: string }) {
                 <button
                   type="button"
                   className="button button--small"
-                  disabled={selectedItems.size === 0}
+                  disabled={selectedItems.size === 0 || !bulkCategoryChosen}
                   onClick={applyBulkCategory}
                 >
                   Apply to {selectedItems.size || "selected"}
@@ -1552,6 +1564,9 @@ function ReceiptEditor({ id }: { id: string }) {
                       title={
                         item.categoryId
                           ? categoryLabel(
+                              // Defensive fallback for a stale category-list
+                              // response; referenced categories cannot normally
+                              // be deleted by the API.
                               categories.find(
                                 ({ id }) => id === item.categoryId,
                               ) ??
@@ -1566,7 +1581,7 @@ function ReceiptEditor({ id }: { id: string }) {
                       }
                       onKeyDown={(event) => {
                         if (
-                          (event.altKey || event.ctrlKey) &&
+                          event.ctrlKey &&
                           (event.key === "ArrowDown" || event.key === "ArrowUp")
                         ) {
                           event.preventDefault();
@@ -1593,7 +1608,7 @@ function ReceiptEditor({ id }: { id: string }) {
                       />
                     </select>
                     <small>
-                      Use Ctrl/Alt + ↑/↓ to move between category controls.
+                      Use Ctrl + ↑/↓ to move between category controls.
                     </small>
                   </div>
                   <EditorField

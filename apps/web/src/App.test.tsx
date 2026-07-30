@@ -836,6 +836,7 @@ describe("receipt editor", () => {
     });
     fireEvent.click(screen.getByRole("checkbox", { name: "Item 1" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Item 2" }));
+    expect(screen.getByRole("button", { name: "Apply to 2" })).toBeDisabled();
     fireEvent.change(screen.getByLabelText("Category for selected items"), {
       target: { value: childId },
     });
@@ -848,6 +849,12 @@ describe("receipt editor", () => {
       ctrlKey: true,
     });
     expect(controls[1]).toHaveFocus();
+    controls[0]?.focus();
+    fireEvent.keyDown(controls[0] as HTMLElement, {
+      key: "ArrowDown",
+      altKey: true,
+    });
+    expect(controls[0]).toHaveFocus();
 
     fireEvent.click(
       screen.getByText("Create a category without losing receipt edits"),
