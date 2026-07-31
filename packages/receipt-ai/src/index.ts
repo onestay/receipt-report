@@ -5,6 +5,7 @@ import {
   receiptDateSchema,
   receiptTimeSchema,
 } from "@receipt-report/contracts";
+export * from "./proposals.js";
 
 export const EXTRACTION_SCHEMA_VERSION = "receipt-extraction-v1";
 export const GERMAN_RECEIPT_PROFILE_VERSION = "de-receipt-v1";

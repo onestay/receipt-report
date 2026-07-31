@@ -185,6 +185,10 @@ describe("extraction job migration", () => {
       `INSERT INTO "ReceiptDocument" ("id", "receiptId", "relativePath", "mediaType", "byteSize", "sha256", "normalizationStatus", "createdAt", "updatedAt")
        VALUES ('cm32222222222222222222222', 'cm31111111111111111111111', 'originals/migration.png', 'image/png', 1, '${"a".repeat(64)}', 'complete', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
     );
+    await database.$executeRawUnsafe(
+      `INSERT INTO "LineItem" ("id", "receiptId", "description", "lineTotalCents", "position")
+       VALUES ('cm33333333333333333333333', 'cm31111111111111111111111', 'Preserved item', 123, 0)`,
+    );
     await database.$disconnect();
     database = undefined;
 
@@ -204,6 +208,27 @@ describe("extraction job migration", () => {
       normalizationRevision: "legacy-cm32222222222222222222222",
     });
     expect(await database.extractionJob.count()).toBe(0);
+    await database.$disconnect();
+    database = undefined;
+    await cp(
+      join(sourceMigrationsDirectory, "20260731141500_extraction_proposals"),
+      join(testMigrationsDirectory, "20260731141500_extraction_proposals"),
+      { recursive: true },
+    );
+    deploy(databaseUrl, testSchemaPath);
+    database = await createDatabase(databaseUrl);
+    expect(
+      await database.receipt.findUniqueOrThrow({
+        where: { id: "cm31111111111111111111111" },
+        select: { netCents: true, taxCents: true },
+      }),
+    ).toEqual({ netCents: null, taxCents: null });
+    expect(
+      await database.lineItem.findUniqueOrThrow({
+        where: { id: "cm33333333333333333333333" },
+        select: { kind: true, lineTotalCents: true },
+      }),
+    ).toEqual({ kind: "item", lineTotalCents: 123 });
     expect(
       await database.$queryRawUnsafe<unknown[]>("PRAGMA foreign_key_check"),
     ).toEqual([]);

@@ -10,6 +10,7 @@ RUN pnpm install --frozen-lockfile --filter . --filter @receipt-report/api... --
 RUN pnpm --filter @receipt-report/config build \
     && pnpm --filter @receipt-report/contracts build \
     && pnpm --filter @receipt-report/database build \
+    && pnpm --filter @receipt-report/receipt-ai build \
     && pnpm --filter @receipt-report/api build \
     && pnpm --filter @receipt-report/web build
 

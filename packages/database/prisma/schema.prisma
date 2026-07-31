@@ -46,21 +46,24 @@ model MerchantStore {
 }
 
 model Receipt {
-  id              String           @id @default(cuid())
-  merchantRaw     String
-  merchantBrandId String?
-  merchantStoreId String?
-  merchantBrand   MerchantBrand?   @relation(fields: [merchantBrandId], references: [id], onDelete: Restrict)
-  merchantStore   MerchantStore?   @relation(fields: [merchantStoreId, merchantBrandId], references: [id, brandId], onDelete: Restrict)
-  purchaseDate    String
-  purchaseTime    String?
-  currency        String           @default("EUR")
-  notes           String?
-  totalCents      Int
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
-  lineItems       LineItem[]
-  document        ReceiptDocument?
+  id                  String               @id @default(cuid())
+  merchantRaw         String
+  merchantBrandId     String?
+  merchantStoreId     String?
+  merchantBrand       MerchantBrand?       @relation(fields: [merchantBrandId], references: [id], onDelete: Restrict)
+  merchantStore       MerchantStore?       @relation(fields: [merchantStoreId, merchantBrandId], references: [id, brandId], onDelete: Restrict)
+  purchaseDate        String
+  purchaseTime        String?
+  currency            String               @default("EUR")
+  notes               String?
+  totalCents          Int
+  netCents            Int?
+  taxCents            Int?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  lineItems           LineItem[]
+  document            ReceiptDocument?
+  extractionProposals ExtractionProposal[]
 
   @@index([purchaseDate, id])
   @@index([merchantBrandId])
@@ -68,27 +71,28 @@ model Receipt {
 }
 
 model ReceiptDocument {
-  id                          String            @id @default(cuid())
-  receiptId                   String            @unique
-  receipt                     Receipt           @relation(fields: [receiptId], references: [id], onDelete: Restrict)
-  relativePath                String            @unique
+  id                          String               @id @default(cuid())
+  receiptId                   String               @unique
+  receipt                     Receipt              @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+  relativePath                String               @unique
   originalFilename            String?
   mediaType                   String
   byteSize                    Int
   sha256                      String
-  createdAt                   DateTime          @default(now())
-  updatedAt                   DateTime          @updatedAt
-  normalizationStatus         String            @default("pending")
+  createdAt                   DateTime             @default(now())
+  updatedAt                   DateTime             @updatedAt
+  normalizationStatus         String               @default("pending")
   normalizationError          String?
   normalizationProfileVersion String?
   normalizationRenderer       String?
-  normalizationRequestedAt    DateTime          @default(now())
+  normalizationRequestedAt    DateTime             @default(now())
   normalizationStartedAt      DateTime?
   normalizationCompletedAt    DateTime?
   normalizationRevision       String?
   pages                       ReceiptPage[]
   normalizationJob            NormalizationJob?
   extractionJobs              ExtractionJob[]
+  extractionProposals         ExtractionProposal[]
 
   @@unique([sha256, byteSize])
 }
@@ -154,26 +158,76 @@ model ExtractionJob {
 }
 
 model ExtractionAttempt {
-  id                       String        @id @default(cuid())
+  id                       String              @id @default(cuid())
   jobId                    String
-  job                      ExtractionJob @relation(fields: [jobId], references: [id], onDelete: Restrict)
+  job                      ExtractionJob       @relation(fields: [jobId], references: [id], onDelete: Restrict)
   attemptNumber            Int
   provider                 String
   model                    String
   extractionProfileVersion String
-  status                   String        @default("running")
+  status                   String              @default("running")
   failureKind              String?
   retryable                Boolean?
-  startedAt                DateTime      @default(now())
+  startedAt                DateTime            @default(now())
   completedAt              DateTime?
   durationMs               Int?
   rawProviderOutput        String?
   rawPurgedAt              DateTime?
   validatedOutput          String?
-  createdAt                DateTime      @default(now())
+  createdAt                DateTime            @default(now())
+  proposal                 ExtractionProposal?
 
   @@unique([jobId, attemptNumber])
   @@index([completedAt, rawPurgedAt])
+}
+
+model ExtractionProposal {
+  id                       String               @id @default(cuid())
+  receiptId                String
+  receipt                  Receipt              @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+  documentId               String
+  document                 ReceiptDocument      @relation(fields: [documentId], references: [id], onDelete: Restrict)
+  attemptId                String               @unique
+  attempt                  ExtractionAttempt    @relation(fields: [attemptId], references: [id], onDelete: Restrict)
+  normalizationRevision    String
+  extractionProfileVersion String
+  status                   String               @default("pending")
+  snapshot                 String
+  createdAt                DateTime             @default(now())
+  updatedAt                DateTime             @updatedAt
+  findings                 ExtractionFinding[]
+  decisions                ExtractionDecision[]
+
+  @@index([receiptId, createdAt])
+  @@index([documentId, normalizationRevision, status])
+}
+
+model ExtractionFinding {
+  id         String             @id @default(cuid())
+  proposalId String
+  proposal   ExtractionProposal @relation(fields: [proposalId], references: [id], onDelete: Restrict)
+  code       String
+  severity   String
+  fieldPath  String?
+  message    String
+  createdAt  DateTime           @default(now())
+
+  @@index([proposalId, severity, code])
+}
+
+model ExtractionDecision {
+  id                   String             @id @default(cuid())
+  proposalId           String
+  proposal             ExtractionProposal @relation(fields: [proposalId], references: [id], onDelete: Restrict)
+  kind                 String
+  actor                String
+  proposalSnapshot     String
+  acceptedSnapshot     String?
+  differences          String?
+  acknowledgedWarnings String?
+  decidedAt            DateTime           @default(now())
+
+  @@index([proposalId, decidedAt])
 }
 
 /// Durable retry record for filesystem cleanup that could not complete after a
@@ -242,6 +296,7 @@ model LineItem {
   quantityMilli  Int?
   unitPriceCents Int?
   lineTotalCents Int
+  kind           String    @default("item")
   position       Int
 
   @@unique([receiptId, position])

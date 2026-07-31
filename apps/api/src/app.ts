@@ -25,6 +25,7 @@ import {
   receiptIdSchema,
   receiptListQuerySchema,
   receiptUpdateSchema,
+  proposalApproveSchema,
   type ApiError,
 } from "@receipt-report/contracts";
 import type {
@@ -48,6 +49,7 @@ import { ExtractionRepository } from "./extractions.js";
 import { MerchantRepository } from "./merchants.js";
 import { stageMultipartDocument } from "./multipart.js";
 import { ReceiptRepository } from "./receipts.js";
+import { ProposalRepository } from "./proposals.js";
 
 export type AppOptions = {
   webDistDirectory?: string;
@@ -418,6 +420,81 @@ export function createApp(options: AppOptions = {}): Express {
       const extractions = new ExtractionRepository(
         options.database,
         options.extractionConfig,
+      );
+      const proposals = new ProposalRepository(
+        options.database,
+        options.extractionConfig.maxAttempts,
+      );
+      app.get(
+        "/api/v1/receipts/:id/extraction-proposal",
+        async (request, response, next) => {
+          try {
+            response.json(
+              await proposals.current(receiptIdSchema.parse(request.params.id)),
+            );
+          } catch (error) {
+            next(error);
+          }
+        },
+      );
+      app.get(
+        "/api/v1/receipts/:id/extraction-proposals",
+        async (request, response, next) => {
+          try {
+            response.json(
+              await proposals.history(receiptIdSchema.parse(request.params.id)),
+            );
+          } catch (error) {
+            next(error);
+          }
+        },
+      );
+      app.post(
+        "/api/v1/receipts/:id/extraction-proposals/:proposalId/approve",
+        async (request, response, next) => {
+          try {
+            response.json(
+              await proposals.approve(
+                receiptIdSchema.parse(request.params.id),
+                idSchema.parse(request.params.proposalId),
+                proposalApproveSchema.parse(request.body),
+              ),
+            );
+          } catch (error) {
+            next(error);
+          }
+        },
+      );
+      app.post(
+        "/api/v1/receipts/:id/extraction-proposals/:proposalId/reject",
+        async (request, response, next) => {
+          try {
+            response.json(
+              await proposals.reject(
+                receiptIdSchema.parse(request.params.id),
+                idSchema.parse(request.params.proposalId),
+              ),
+            );
+          } catch (error) {
+            next(error);
+          }
+        },
+      );
+      app.post(
+        "/api/v1/receipts/:id/extraction/reprocess",
+        async (request, response, next) => {
+          try {
+            response
+              .status(202)
+              .json(
+                await proposals.reprocess(
+                  receiptIdSchema.parse(request.params.id),
+                ),
+              );
+          } catch (error) {
+            next(error);
+          }
+        },
       );
       app.get(
         "/api/v1/receipts/:id/document/extraction",

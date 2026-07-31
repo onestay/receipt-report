@@ -118,9 +118,12 @@ In the manual ledger, quantity is an optional positive integer in thousandths
 (`quantityMilli`), and ordered line items are persisted by their zero-based
 position. Quantity, unit price, line total, and receipt total are independently
 entered; reconciliation belongs to a later review workflow.
-Manual-ledger amounts are non-negative; modeling discounts, returns, and deposit
-refunds as signed lines is intentionally deferred to the later extraction and
-review domain.
+Canonical line amounts are signed integer cents. Every line has one explicit
+kind: `item`, `discount`, `return`, `deposit`, `deposit_refund`, or `unknown`.
+Existing manual rows migrate to `item`; AI proposals start at `unknown`, and a
+more specific kind is accepted only through explicit review. Receipt gross,
+net, and tax totals remain non-negative; optional net and tax values preserve
+missing as `null` rather than coercing it to zero.
 
 The manual editor treats the explicit receipt total and the integer sum of line
 totals as separate user-entered values. A discrepancy is visible but does not

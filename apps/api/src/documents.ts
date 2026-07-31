@@ -321,6 +321,10 @@ export class DocumentRepository {
             claimToken: null,
           },
         });
+        await transaction.extractionProposal.updateMany({
+          where: { documentId: current.id, status: "pending" },
+          data: { status: "superseded" },
+        });
         await transaction.normalizationJob.upsert({
           where: { documentId: current.id },
           create: {
@@ -375,6 +379,14 @@ export class DocumentRepository {
       include: { pages: { select: { relativePath: true } } },
     });
     if (!document) throw new NotFoundError("Receipt document not found");
+    if (
+      (await this.database.extractionProposal.count({
+        where: { documentId: document.id },
+      })) > 0
+    )
+      throw new ConflictError(
+        "Receipt document with extraction history cannot be removed",
+      );
     const paths = [
       document.relativePath,
       ...document.pages.map((p) => p.relativePath),

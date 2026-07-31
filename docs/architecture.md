@@ -140,6 +140,10 @@ retention-bounded raw provider output also live in SQLite. They can materially
 increase database size, but do not create a second persistence service or
 backup boundary. Stop API and worker writers and back up SQLite (including WAL
 sidecars) together with the document tree before migrations or restore.
+Validated extraction proposals, findings, and approve/reject decisions are
+also retained in SQLite with restrictive deletion. They preserve the original
+proposal and exact accepted snapshot while canonical receipts change only in an
+explicit optimistic-concurrency approval transaction.
 
 Receipt document storage uses a dedicated absolute, non-root directory distinct
 from the SQLite file. Staging, retained originals, and normalized pages all live

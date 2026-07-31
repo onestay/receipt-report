@@ -65,6 +65,7 @@ export function normalizeMerchantAddressKey(address: {
 export const idSchema = z.string().cuid();
 export const receiptIdSchema = idSchema;
 export const euroCentsSchema = z.number().int().safe().nonnegative();
+export const signedEuroCentsSchema = z.number().int().safe();
 export const quantityMilliSchema = z.number().int().safe().positive();
 export const receiptDateSchema = z.string().refine((value) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -84,8 +85,18 @@ export const lineItemInputSchema = z
   .object({
     description: trimmedNonEmptyText,
     quantityMilli: quantityMilliSchema.nullish(),
-    unitPriceCents: euroCentsSchema.nullish(),
-    lineTotalCents: euroCentsSchema,
+    unitPriceCents: signedEuroCentsSchema.nullish(),
+    lineTotalCents: signedEuroCentsSchema,
+    kind: z
+      .enum([
+        "item",
+        "discount",
+        "return",
+        "deposit",
+        "deposit_refund",
+        "unknown",
+      ])
+      .default("item"),
     categoryId: idSchema.nullish(),
   })
   .strict();
@@ -394,6 +405,8 @@ export const receiptCreateSchema = z
       .transform((value) => value.trim())
       .nullish(),
     totalCents: euroCentsSchema,
+    netCents: euroCentsSchema.nullish(),
+    taxCents: euroCentsSchema.nullish(),
     lineItems: z.array(lineItemInputSchema).default([]),
   })
   .strict()
@@ -411,6 +424,8 @@ export const receiptUpdateSchema = z
       .transform((value) => value.trim())
       .nullish(),
     totalCents: euroCentsSchema.optional(),
+    netCents: euroCentsSchema.nullish(),
+    taxCents: euroCentsSchema.nullish(),
     lineItems: z.array(lineItemUpdateInputSchema).optional(),
   })
   .strict()
@@ -460,6 +475,8 @@ const receiptBaseSchema = z.object({
   currency: z.literal("EUR"),
   notes: z.string().nullable(),
   totalCents: euroCentsSchema,
+  netCents: euroCentsSchema.nullable().default(null),
+  taxCents: euroCentsSchema.nullable().default(null),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
@@ -553,6 +570,103 @@ export const extractionStatusResponseSchema = z.object({
     })
     .nullable(),
 });
+export const lineItemKindSchema = z.enum([
+  "item",
+  "discount",
+  "return",
+  "deposit",
+  "deposit_refund",
+  "unknown",
+]);
+export const proposalCategorySuggestionSchema = z
+  .object({
+    categoryId: idSchema,
+    ruleId: idSchema,
+    scopeKind: categorySuggestionScopeSchema,
+  })
+  .strict();
+export const proposalLineSchema = z
+  .object({
+    sourcePosition: z.number().int().nonnegative(),
+    description: z.string().max(1000),
+    descriptionConfidence: z.number().min(0).max(1).nullable(),
+    quantityMilli: quantityMilliSchema.nullable(),
+    unitPriceCents: signedEuroCentsSchema.nullable(),
+    lineTotalCents: signedEuroCentsSchema,
+    categoryId: idSchema.nullable(),
+    categorySuggestion: proposalCategorySuggestionSchema.nullable(),
+    kind: lineItemKindSchema,
+  })
+  .strict();
+export const proposalSnapshotSchema = z
+  .object({
+    merchantRaw: z.string().max(1000),
+    merchantConfidence: z.number().min(0).max(1).nullable(),
+    merchantBrandId: idSchema.nullable(),
+    merchantStoreId: idSchema.nullable(),
+    purchaseDate: z.string().max(100),
+    purchaseDateConfidence: z.number().min(0).max(1).nullable(),
+    purchaseTime: z.string().max(100).nullable(),
+    purchaseTimeConfidence: z.number().min(0).max(1).nullable(),
+    currency: z.string().max(10),
+    totalCents: signedEuroCentsSchema,
+    totalConfidence: z.number().min(0).max(1).nullable(),
+    netCents: signedEuroCentsSchema.nullable(),
+    taxCents: signedEuroCentsSchema.nullable(),
+    lineItems: z.array(proposalLineSchema).max(1000),
+  })
+  .strict();
+export const proposalFindingSchema = z.object({
+  code: z.string().min(1),
+  severity: z.enum(["info", "warning", "blocking"]),
+  fieldPath: z.string().nullable(),
+  message: z.string().min(1),
+});
+export const extractionProposalSchema = z.object({
+  id: idSchema,
+  receiptId: receiptIdSchema,
+  documentId: idSchema,
+  attemptId: idSchema,
+  normalizationRevision: z.string().min(1),
+  extractionProfileVersion: z.string().min(1),
+  status: z.enum(["pending", "approved", "rejected", "superseded"]),
+  snapshot: proposalSnapshotSchema,
+  findings: z.array(proposalFindingSchema),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+export const extractionProposalHistorySchema = z.object({
+  proposals: z.array(extractionProposalSchema),
+  decisions: z.array(
+    z.object({
+      id: idSchema,
+      proposalId: idSchema,
+      kind: z.enum(["approved", "rejected"]),
+      actor: z.string().min(1),
+      proposalSnapshot: proposalSnapshotSchema,
+      acceptedSnapshot: proposalSnapshotSchema.nullable(),
+      differences: z
+        .array(
+          z.object({
+            path: z.string(),
+            proposed: z.unknown(),
+            accepted: z.unknown(),
+          }),
+        )
+        .nullable(),
+      acknowledgedWarnings: z.array(z.string()).nullable(),
+      decidedAt: z.string().datetime(),
+    }),
+  ),
+});
+export const proposalApproveSchema = z
+  .object({
+    receiptUpdatedAt: z.string().datetime(),
+    normalizationRevision: z.string().min(1),
+    snapshot: proposalSnapshotSchema,
+    acknowledgedWarningCodes: z.array(z.string().min(1)).default([]),
+  })
+  .strict();
 export const NORMALIZATION_PROFILE_VERSION = "receipt-page-v1";
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 const relativeStoragePathSchema = z
@@ -672,3 +786,7 @@ export type ReceiptList = z.infer<typeof receiptListSchema>;
 export type ApiError = z.infer<typeof apiErrorSchema>;
 export type ReceiptDocument = z.infer<typeof receiptDocumentSchema>;
 export type ReceiptPage = z.infer<typeof receiptPageSchema>;
+export type ProposalSnapshot = z.infer<typeof proposalSnapshotSchema>;
+export type ProposalFinding = z.infer<typeof proposalFindingSchema>;
+export type ExtractionProposal = z.infer<typeof extractionProposalSchema>;
+export type ProposalApprove = z.infer<typeof proposalApproveSchema>;
