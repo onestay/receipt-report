@@ -45,6 +45,7 @@ type StoredDocument = {
   normalizationRequestedAt: Date;
   normalizationStartedAt: Date | null;
   normalizationCompletedAt: Date | null;
+  normalizationRevision: string | null;
   pages: StoredPage[];
 };
 
@@ -91,6 +92,7 @@ function publicDocument(document: StoredDocument): ReceiptDocumentResponse {
       document.normalizationStartedAt?.toISOString() ?? null,
     normalizationCompletedAt:
       document.normalizationCompletedAt?.toISOString() ?? null,
+    normalizationRevision: document.normalizationRevision,
     originalUrl: `/api/v1/receipts/${document.receiptId}/documents/${document.id}/original`,
     pages: document.pages.map((page) => ({
       ...page,
@@ -288,6 +290,7 @@ export class DocumentRepository {
             normalizationRequestedAt: new Date(),
             normalizationStartedAt: null,
             normalizationCompletedAt: null,
+            normalizationRevision: null,
           },
         });
         if (result.count !== 1)
@@ -305,6 +308,18 @@ export class DocumentRepository {
           });
         await transaction.receiptPage.deleteMany({
           where: { documentId: current.id },
+        });
+        await transaction.extractionJob.updateMany({
+          where: {
+            documentId: current.id,
+            status: { in: ["pending", "running", "retry_wait"] },
+          },
+          data: {
+            status: "cancelled",
+            claimedAt: null,
+            leaseExpiresAt: null,
+            claimToken: null,
+          },
         });
         await transaction.normalizationJob.upsert({
           where: { documentId: current.id },
@@ -375,6 +390,16 @@ export class DocumentRepository {
         where: { documentId: document.id },
       });
       await transaction.normalizationJob.deleteMany({
+        where: { documentId: document.id },
+      });
+      const extractionJobs = await transaction.extractionJob.findMany({
+        where: { documentId: document.id },
+        select: { id: true },
+      });
+      await transaction.extractionAttempt.deleteMany({
+        where: { jobId: { in: extractionJobs.map((job) => job.id) } },
+      });
+      await transaction.extractionJob.deleteMany({
         where: { documentId: document.id },
       });
       await transaction.receiptDocument.delete({ where: { id: document.id } });

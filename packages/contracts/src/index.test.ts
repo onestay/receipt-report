@@ -117,6 +117,7 @@ describe("receipt document contracts", () => {
         normalizationRequestedAt: "2026-07-21T00:00:00.000Z",
         normalizationStartedAt: "2026-07-21T00:00:00.000Z",
         normalizationCompletedAt: "2026-07-21T00:00:00.000Z",
+        normalizationRevision: "receipt-page-v1-job-1",
         pages: [
           {
             id: brandId,

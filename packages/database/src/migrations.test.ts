@@ -143,3 +143,69 @@ describe("category migration", () => {
     ).toBeNull();
   });
 });
+
+describe("extraction job migration", () => {
+  it("preserves normalized documents without silently enqueueing historical data", async () => {
+    directory = await mkdtemp(
+      join(tmpdir(), `receipt-report-extraction-upgrade-${process.pid}-`),
+    );
+    const databaseUrl = `file:${join(directory, "upgrade.db")}`;
+    const sourcePrismaDirectory = resolve("packages/database/prisma");
+    const sourceMigrationsDirectory = join(sourcePrismaDirectory, "migrations");
+    const testPrismaDirectory = join(directory, "prisma");
+    const testMigrationsDirectory = join(testPrismaDirectory, "migrations");
+    await mkdir(testMigrationsDirectory, { recursive: true });
+    await copyFile(
+      join(sourcePrismaDirectory, "schema.prisma"),
+      join(testPrismaDirectory, "schema.prisma"),
+    );
+    await copyFile(
+      join(sourceMigrationsDirectory, "migration_lock.toml"),
+      join(testMigrationsDirectory, "migration_lock.toml"),
+    );
+    const migrationName = "20260731130000_extraction_jobs";
+    const migrationNames = (await readdir(sourceMigrationsDirectory))
+      .filter((name) => name < migrationName)
+      .sort();
+    for (const name of migrationNames) {
+      await cp(
+        join(sourceMigrationsDirectory, name),
+        join(testMigrationsDirectory, name),
+        { recursive: true },
+      );
+    }
+    const testSchemaPath = join(testPrismaDirectory, "schema.prisma");
+    deploy(databaseUrl, testSchemaPath);
+    database = await createDatabase(databaseUrl);
+    await database.$executeRawUnsafe(
+      `INSERT INTO "Receipt" ("id", "merchantRaw", "purchaseDate", "currency", "totalCents", "createdAt", "updatedAt")
+       VALUES ('cm31111111111111111111111', 'Migration receipt', '2026-07-31', 'EUR', 123, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+    );
+    await database.$executeRawUnsafe(
+      `INSERT INTO "ReceiptDocument" ("id", "receiptId", "relativePath", "mediaType", "byteSize", "sha256", "normalizationStatus", "createdAt", "updatedAt")
+       VALUES ('cm32222222222222222222222', 'cm31111111111111111111111', 'originals/migration.png', 'image/png', 1, '${"a".repeat(64)}', 'complete', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+    );
+    await database.$disconnect();
+    database = undefined;
+
+    await cp(
+      join(sourceMigrationsDirectory, migrationName),
+      join(testMigrationsDirectory, migrationName),
+      { recursive: true },
+    );
+    deploy(databaseUrl, testSchemaPath);
+    database = await createDatabase(databaseUrl);
+    expect(
+      await database.receiptDocument.findUniqueOrThrow({
+        where: { id: "cm32222222222222222222222" },
+        select: { normalizationRevision: true },
+      }),
+    ).toEqual({
+      normalizationRevision: "legacy-cm32222222222222222222222",
+    });
+    expect(await database.extractionJob.count()).toBe(0);
+    expect(
+      await database.$queryRawUnsafe<unknown[]>("PRAGMA foreign_key_check"),
+    ).toEqual([]);
+  });
+});

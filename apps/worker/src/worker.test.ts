@@ -8,6 +8,7 @@ import {
   normalizedPageRevisionPath,
 } from "@receipt-report/database";
 import { startWorker } from "./worker.js";
+import { ReceiptExtractionError } from "@receipt-report/receipt-ai";
 
 let directory: string | undefined;
 
@@ -87,12 +88,11 @@ describe("worker lifecycle", () => {
     expect(await readFile(readyFile, "utf8")).toMatch(/^\d+\n$/);
     expect(await seedStorage.exists(orphanedPath)).toBe(false);
     expect(await worker.database.documentFileCleanup.count()).toBe(0);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      const normalized =
-        await worker.database.receiptDocument.findUniqueOrThrow({
-          where: { id: document.id },
-        });
-      if (normalized.normalizationStatus === "complete") break;
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      const extraction = await worker.database.extractionJob.findFirst({
+        where: { documentId: document.id },
+      });
+      if (extraction?.status === "succeeded") break;
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
     expect(render).toHaveBeenCalledOnce();
@@ -101,9 +101,27 @@ describe("worker lifecycle", () => {
         where: { id: document.id },
       }),
     ).resolves.toMatchObject({ normalizationStatus: "complete" });
+    await expect(
+      worker.database.extractionJob.findFirstOrThrow({
+        where: { documentId: document.id },
+      }),
+    ).resolves.toMatchObject({ status: "succeeded", attempts: 1 });
     await worker.stop();
     await worker.stop();
     await expect(access(readyFile)).rejects.toThrow();
+  });
+
+  it("rejects a lease that cannot cover the provider timeout", async () => {
+    await expect(
+      startWorker({
+        ...process.env,
+        DATABASE_URL: "file:/tmp/unused-worker-config.db",
+        STORAGE_PATH: "/tmp/unused-worker-storage",
+        WORKER_READY_FILE: "/tmp/unused-worker.ready",
+        EXTRACTION_TIMEOUT_MS: "1000",
+        EXTRACTION_LEASE_MS: "60000",
+      }),
+    ).rejects.toBeInstanceOf(ReceiptExtractionError);
   });
 });
 import { execFileSync } from "node:child_process";

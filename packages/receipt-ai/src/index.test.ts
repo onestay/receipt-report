@@ -10,6 +10,7 @@ import {
   decimalEurosToCents,
   extractionRequestSchema,
   germanReceiptProfile,
+  parseRetryAfterMs,
   reconcileExtractionTotals,
   receiptExtractionSchema,
   type ExtractionRequest,
@@ -283,6 +284,19 @@ function adapter(baseUrl: string, overrides = {}) {
 }
 
 describe("OpenAI-compatible adapter", () => {
+  it("accepts only future, bounded-representable Retry-After values", () => {
+    const now = Date.parse("2026-07-31T12:00:00.000Z");
+    expect(parseRetryAfterMs("5", now)).toBe(5000);
+    expect(parseRetryAfterMs("Fri, 31 Jul 2026 12:00:10 GMT", now)).toBe(
+      10_000,
+    );
+    expect(
+      parseRetryAfterMs("Fri, 31 Jul 2026 11:59:59 GMT", now),
+    ).toBeUndefined();
+    expect(parseRetryAfterMs("invalid", now)).toBeUndefined();
+    expect(parseRetryAfterMs(null, now)).toBeUndefined();
+  });
+
   it("selects an adapter from validated configuration", () => {
     const configured = createConfiguredReceiptExtractor(
       {
@@ -296,7 +310,7 @@ describe("OpenAI-compatible adapter", () => {
       { fakeResult: result() },
     );
     expect(configured.name).toBe("fake");
-    expect(() =>
+    expect(
       createConfiguredReceiptExtractor({
         EXTRACTION_PROVIDER: "fake",
         EXTRACTION_PROFILE_VERSION: GERMAN_RECEIPT_PROFILE_VERSION,
@@ -304,8 +318,8 @@ describe("OpenAI-compatible adapter", () => {
         EXTRACTION_MAX_PAGES: 2,
         EXTRACTION_MAX_IMAGE_BYTES: 100,
         EXTRACTION_MAX_RESPONSE_BYTES: 1000,
-      }),
-    ).toThrowError("Receipt extraction failed: configuration");
+      }).name,
+    ).toBe("fake");
 
     const remote = createConfiguredReceiptExtractor(
       {
@@ -415,6 +429,29 @@ describe("OpenAI-compatible adapter", () => {
     });
     expect(String(error)).not.toContain(body);
     expect(String(error)).not.toContain("top-secret-test-key");
+    if (body.startsWith("{"))
+      expect(error).toMatchObject({ rawProviderOutput: body });
+  });
+
+  it("parses Retry-After without exposing it in the message", async () => {
+    const transport = vi.fn<typeof fetch>(
+      async () =>
+        new Response("rate limited", {
+          status: 429,
+          headers: { "retry-after": "12" },
+        }),
+    );
+    const error = await adapter("https://provider.invalid/v1/", {
+      fetch: transport,
+    })
+      .extract(request)
+      .catch((value: unknown) => value);
+    expect(error).toMatchObject({
+      kind: "rate_limit",
+      retryable: true,
+      retryAfterMs: 12_000,
+      message: "Receipt extraction failed: rate_limit",
+    });
   });
 
   it("enforces the response byte limit", async () => {
