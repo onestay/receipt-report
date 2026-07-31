@@ -91,6 +91,9 @@ Every pull request must run:
 5. Unit and integration tests with coverage thresholds
 6. Production builds
 7. Playwright browser tests
+8. For user-visible UI changes, inspected Playwright screenshots at
+   representative desktop and mobile viewports, embedded as Markdown images or
+   stable image links in the pull request description
 
 CI publishes a browsable coverage report and Playwright failure artifacts. Test
 commands must also be runnable locally through stable root-level package scripts.

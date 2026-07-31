@@ -36,6 +36,12 @@ These instructions apply to the entire repository.
 - Run the repository's formatting, linting, type-checking, unit/integration
   tests with coverage, browser tests, and build commands before finishing. If a
   command cannot be run, state why.
+- Verify every user-visible UI change in a real browser at representative
+  desktop and mobile viewports. Capture Playwright screenshots of the affected
+  states, inspect them for visual regressions, and embed the relevant evidence
+  as Markdown images or stable image links in the pull request description so
+  human and automated reviewers can inspect it. DOM assertions alone are not
+  visual verification.
 - Keep anonymized fixtures minimal and clearly synthetic.
 - Tests must not call paid AI providers, external email services, or the public
   internet unless they are explicitly marked as opt-in external tests.
