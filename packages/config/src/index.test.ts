@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { resolve } from "node:path";
-import { parseApiConfig, parseWorkerConfig } from "./index.js";
+import {
+  parseApiConfig,
+  parseReceiptAiConfig,
+  parseWorkerConfig,
+} from "./index.js";
 
 const shared = {
   DATABASE_URL: "file:/tmp/receipt-report/test.db",
@@ -91,6 +95,59 @@ describe("configuration", () => {
         ...shared,
         DATABASE_URL: "file:.runtime/relative.db",
         STORAGE_PATH: resolve(".runtime"),
+      }),
+    ).toThrow();
+  });
+
+  it("defaults receipt AI to the local deterministic provider", () => {
+    expect(parseReceiptAiConfig({})).toEqual({
+      EXTRACTION_PROVIDER: "fake",
+      EXTRACTION_PROFILE_VERSION: "de-receipt-v1",
+      EXTRACTION_TIMEOUT_MS: 60_000,
+      EXTRACTION_MAX_PAGES: 10,
+      EXTRACTION_MAX_IMAGE_BYTES: 20 * 1024 * 1024,
+      EXTRACTION_MAX_RESPONSE_BYTES: 1024 * 1024,
+    });
+  });
+
+  it("validates OpenAI-compatible extraction configuration", () => {
+    expect(() =>
+      parseReceiptAiConfig({ EXTRACTION_PROVIDER: "openai-compatible" }),
+    ).toThrow();
+    expect(
+      parseReceiptAiConfig({
+        EXTRACTION_PROVIDER: "openai-compatible",
+        EXTRACTION_BASE_URL: "https://provider.example/v1/",
+        EXTRACTION_MODEL: "vision-model",
+        EXTRACTION_API_KEY: "secret",
+        EXTRACTION_MAX_PAGES: "2",
+      }),
+    ).toMatchObject({
+      EXTRACTION_PROVIDER: "openai-compatible",
+      EXTRACTION_BASE_URL: "https://provider.example/v1/",
+      EXTRACTION_MODEL: "vision-model",
+      EXTRACTION_API_KEY: "secret",
+      EXTRACTION_MAX_PAGES: 2,
+    });
+  });
+
+  it.each([
+    ["EXTRACTION_TIMEOUT_MS", "0"],
+    ["EXTRACTION_MAX_PAGES", "1.5"],
+    ["EXTRACTION_MAX_IMAGE_BYTES", "-1"],
+    ["EXTRACTION_MAX_RESPONSE_BYTES", "0"],
+    ["EXTRACTION_PROFILE_VERSION", "future-profile"],
+  ])("rejects invalid %s", (key, value) => {
+    expect(() => parseReceiptAiConfig({ [key]: value })).toThrow();
+  });
+
+  it("rejects a non-HTTP provider base URL", () => {
+    expect(() =>
+      parseReceiptAiConfig({
+        EXTRACTION_PROVIDER: "openai-compatible",
+        EXTRACTION_BASE_URL: "file:///tmp/provider",
+        EXTRACTION_MODEL: "vision-model",
+        EXTRACTION_API_KEY: "secret",
       }),
     ).toThrow();
   });

@@ -53,6 +53,23 @@ Secrets are provided through environment variables. Non-secret settings should
 include provider, model, base URL where applicable, retention behavior, retry
 limits, and whether data may be sent outside the local network.
 
+The first production adapter uses an OpenAI-compatible chat-completions
+endpoint with structured JSON output. It is configured with
+`EXTRACTION_PROVIDER=openai-compatible`, `EXTRACTION_BASE_URL`,
+`EXTRACTION_MODEL`, and `EXTRACTION_API_KEY`. The timeout, extraction-only page
+cap, combined normalized-image byte cap, response byte cap, and pinned profile
+version use the corresponding `EXTRACTION_*` values in `.env.example`. The
+default provider is `fake`, so merely starting the application never transmits
+a receipt.
+
+Configuring a remote provider means normalized receipt page images and the
+minimal German extraction prompt leave the host and are processed under that
+provider's privacy and retention terms. The local correction-rule database is
+never included. API keys, authorization headers, page bytes, raw receipt
+contents, and provider responses must not be written to normal logs or error
+messages. Oversized documents fail locally before a provider request; the MVP
+does not chunk them.
+
 ## Testing
 
 Provider calls are replaced by deterministic fakes in ordinary tests. Contract
