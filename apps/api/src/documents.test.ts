@@ -249,6 +249,7 @@ describe("receipt document API", () => {
       .post(`/api/v1/receipts/${receiptId}/document`)
       .attach("document", png, "first.png")
       .expect(201);
+    await request(app()).delete(`/api/v1/receipts/${receiptId}`).expect(409);
     const oldPath = (
       await database.receiptDocument.findUniqueOrThrow({ where: { receiptId } })
     ).relativePath;
@@ -343,6 +344,72 @@ describe("receipt document API", () => {
     await expect(
       database.receipt.delete({ where: { id: receiptId } }),
     ).resolves.toBeTruthy();
+  });
+
+  it("supersedes pending proposals and protects retained extraction history", async () => {
+    const receiptId = await receipt();
+    const uploaded = await request(app())
+      .post(`/api/v1/receipts/${receiptId}/document`)
+      .attach("document", png, "first.png")
+      .expect(201);
+    await database.receiptDocument.update({
+      where: { id: uploaded.body.id as string },
+      data: {
+        normalizationStatus: "complete",
+        normalizationProfileVersion: "receipt-page-v1",
+        normalizationRevision: "old-revision",
+      },
+    });
+    const job = await database.extractionJob.create({
+      data: {
+        documentId: uploaded.body.id as string,
+        normalizationRevision: "old-revision",
+        normalizationProfileVersion: "receipt-page-v1",
+        extractionProfileVersion: "de-receipt-v1",
+        status: "succeeded",
+        attempts: 1,
+        maxAttempts: 3,
+      },
+    });
+    const attempt = await database.extractionAttempt.create({
+      data: {
+        jobId: job.id,
+        attemptNumber: 1,
+        provider: "fake",
+        model: "fake-v1",
+        extractionProfileVersion: "de-receipt-v1",
+        status: "succeeded",
+      },
+    });
+    const proposal = await database.extractionProposal.create({
+      data: {
+        receiptId,
+        documentId: uploaded.body.id as string,
+        attemptId: attempt.id,
+        normalizationRevision: "old-revision",
+        extractionProfileVersion: "de-receipt-v1",
+        snapshot: "{}",
+      },
+    });
+
+    await request(app())
+      .put(`/api/v1/receipts/${receiptId}/document`)
+      .attach("document", jpeg, "replacement.jpg")
+      .expect(200);
+    await expect(
+      database.extractionProposal.findUniqueOrThrow({
+        where: { id: proposal.id },
+      }),
+    ).resolves.toMatchObject({ status: "superseded" });
+    await request(app())
+      .delete(`/api/v1/receipts/${receiptId}/document`)
+      .expect(409, {
+        error: {
+          code: "conflict",
+          message: "Receipt document with extraction history cannot be removed",
+        },
+      });
+    await request(app()).delete(`/api/v1/receipts/${receiptId}`).expect(409);
   });
 
   it("records failed old-file cleanup durably and retries it", async () => {

@@ -9,9 +9,11 @@ import {
   type ReceiptUpdate,
 } from "@receipt-report/contracts";
 import {
+  ConflictError,
   InvalidCursorError,
   InvalidReferenceError,
   NotFoundError,
+  prismaErrorCode,
 } from "./errors.js";
 
 type Cursor = { purchaseDate: string; id: string };
@@ -338,7 +340,15 @@ export class ReceiptRepository {
   }
 
   async delete(id: string): Promise<void> {
-    const result = await this.database.receipt.deleteMany({ where: { id } });
-    if (result.count === 0) throw new NotFoundError("Receipt not found");
+    try {
+      const result = await this.database.receipt.deleteMany({ where: { id } });
+      if (result.count === 0) throw new NotFoundError("Receipt not found");
+    } catch (error) {
+      if (["P2003", "P2014"].includes(prismaErrorCode(error) ?? ""))
+        throw new ConflictError(
+          "Receipt with retained document or extraction history cannot be deleted",
+        );
+      throw error;
+    }
   }
 }

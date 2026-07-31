@@ -212,7 +212,8 @@ describe("extraction processor", () => {
   });
 
   it("publishes provenance-bearing category suggestions with store precedence", async () => {
-    const { receipt, document } = await seed();
+    const { receipt, document, job } = await seed();
+    const storedJob = requireJob(job);
     const brand = await database.merchantBrand.create({
       data: { name: "Markt", normalizedName: "markt" },
     });
@@ -273,6 +274,30 @@ describe("extraction processor", () => {
         },
       ],
     });
+    const oldAttempt = await database.extractionAttempt.create({
+      data: {
+        jobId: storedJob.id,
+        attemptNumber: 1,
+        provider: "fake",
+        model: "old-fake-v1",
+        extractionProfileVersion: "de-receipt-v1",
+        status: "succeeded",
+      },
+    });
+    const oldProposal = await database.extractionProposal.create({
+      data: {
+        receiptId: receipt.id,
+        documentId: document.id,
+        attemptId: oldAttempt.id,
+        normalizationRevision: "revision-1",
+        extractionProfileVersion: "de-receipt-v1",
+        snapshot: "{}",
+      },
+    });
+    await database.extractionJob.update({
+      where: { id: storedJob.id },
+      data: { attempts: 1 },
+    });
     const absent = { value: null, confidence: null } as const;
     const structured = receiptExtractionSchema.parse({
       schemaVersion: "receipt-extraction-v1",
@@ -310,6 +335,7 @@ describe("extraction processor", () => {
       },
     }).processNext();
     const proposal = await database.extractionProposal.findFirstOrThrow({
+      where: { status: "pending", NOT: { id: oldProposal.id } },
       include: { findings: true },
     });
     expect(JSON.parse(proposal.snapshot)).toMatchObject({
@@ -330,6 +356,11 @@ describe("extraction processor", () => {
         expect.objectContaining({ code: "category_suggestion" }),
       ]),
     );
+    await expect(
+      database.extractionProposal.findUniqueOrThrow({
+        where: { id: oldProposal.id },
+      }),
+    ).resolves.toMatchObject({ status: "superseded" });
   });
 
   it("allows only one live claim across concurrent processors", async () => {
