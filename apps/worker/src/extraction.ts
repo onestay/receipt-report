@@ -4,10 +4,14 @@ import type {
   Database,
   FilesystemDocumentStorage,
 } from "@receipt-report/database";
+import { normalizeRuleDescription } from "@receipt-report/contracts";
 import {
+  extractionToProposal,
+  validateProposal,
   ReceiptExtractionError,
   type ReceiptExtractionErrorKind,
   type ReceiptExtractor,
+  type ProposalSnapshot,
 } from "@receipt-report/receipt-ai";
 
 type ExtractionProcessorConfig = WorkerConfig & ReceiptAiConfig;
@@ -239,6 +243,11 @@ export class ExtractionProcessor {
     startedAt: Date,
   ): Promise<void> {
     const now = this.clock();
+    const proposal = await this.buildProposal(
+      job.documentId,
+      result.structured,
+    );
+    const findings = validateProposal(proposal);
     await this.database.$transaction(async (transaction) => {
       const currentDocument = await transaction.receiptDocument.findFirst({
         where: {
@@ -292,6 +301,30 @@ export class ExtractionProcessor {
           validatedOutput: JSON.stringify(result.structured),
         },
       });
+      await transaction.extractionProposal.updateMany({
+        where: {
+          documentId: job.documentId,
+          status: "pending",
+          NOT: { attemptId: job.attemptId },
+        },
+        data: { status: "superseded" },
+      });
+      await transaction.extractionProposal.create({
+        data: {
+          receiptId: (
+            await transaction.receiptDocument.findUniqueOrThrow({
+              where: { id: job.documentId },
+              select: { receiptId: true },
+            })
+          ).receiptId,
+          documentId: job.documentId,
+          attemptId: job.attemptId,
+          normalizationRevision: job.normalizationRevision,
+          extractionProfileVersion: job.extractionProfileVersion,
+          snapshot: JSON.stringify(proposal),
+          findings: { create: findings },
+        },
+      });
       await transaction.extractionJob.update({
         where: { id: job.id },
         data: {
@@ -303,6 +336,70 @@ export class ExtractionProcessor {
         },
       });
     });
+  }
+
+  private async buildProposal(
+    documentId: string,
+    extraction: Parameters<typeof extractionToProposal>[0],
+  ): Promise<ProposalSnapshot> {
+    const snapshot = extractionToProposal(extraction);
+    const document = await this.database.receiptDocument.findUniqueOrThrow({
+      where: { id: documentId },
+      select: {
+        receipt: { select: { merchantBrandId: true, merchantStoreId: true } },
+      },
+    });
+    snapshot.merchantBrandId = document.receipt.merchantBrandId;
+    snapshot.merchantStoreId = document.receipt.merchantStoreId;
+    for (const line of snapshot.lineItems) {
+      if (line.categoryId !== null || !line.description.trim()) continue;
+      const rules = await this.database.categorySuggestionRule.findMany({
+        where: {
+          normalizedDescription: normalizeRuleDescription(line.description),
+          OR: [
+            ...(document.receipt.merchantStoreId
+              ? [
+                  {
+                    scopeKind: "store",
+                    storeId: document.receipt.merchantStoreId,
+                  },
+                ]
+              : []),
+            ...(document.receipt.merchantBrandId
+              ? [
+                  {
+                    scopeKind: "brand",
+                    brandId: document.receipt.merchantBrandId,
+                  },
+                ]
+              : []),
+            { scopeKind: "global" },
+          ],
+        },
+        orderBy: [{ scopeSpecificity: "desc" }, { id: "asc" }],
+        include: {
+          category: {
+            include: {
+              parent: { select: { archivedAt: true } },
+              _count: { select: { children: true } },
+            },
+          },
+        },
+      });
+      const rule = rules.find(
+        (candidate) =>
+          candidate.category.archivedAt === null &&
+          (candidate.category.parent?.archivedAt ?? null) === null &&
+          candidate.category._count.children === 0,
+      );
+      if (rule)
+        line.categorySuggestion = {
+          categoryId: rule.categoryId,
+          ruleId: rule.id,
+          scopeKind: rule.scopeKind as "global" | "brand" | "store",
+        };
+    }
+    return snapshot;
   }
 
   private retryDelay(job: ClaimedExtractionJob, failure: Failure): number {

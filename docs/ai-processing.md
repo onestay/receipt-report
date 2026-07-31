@@ -36,6 +36,15 @@ Provider SDK types must not leak into domain or API contracts.
 9. Save the proposed extraction for user review.
 10. Preserve approved user corrections during any later reprocessing.
 
+Successful current attempts publish an editable proposal rather than updating
+the receipt. Proposal findings are deterministic and stable-coded; provider
+confidence is retained separately. Approval revalidates the edited snapshot,
+requires explicit warning-code acknowledgement, and atomically compares the
+receipt `updatedAt`, proposal state, and document revision before writing
+canonical data. Rejecting or reprocessing never changes the canonical receipt.
+Proposal and decision history is available through the versioned receipt API;
+raw provider payloads remain excluded.
+
 Normalization publication atomically creates one extraction job for its exact
 normalization revision. Jobs use `pending`, `running`, `retry_wait`,
 `succeeded`, `failed`, and `cancelled` states with conditional claim tokens and

@@ -43,7 +43,7 @@ async function createReceipt(request: APIRequestContext) {
   return (await response.json()) as { id: string };
 }
 
-test("uploads, reviews, replaces, and removes a multi-page document", async ({
+test("uploads, reviews, replaces, and protects extraction history", async ({
   page,
 }) => {
   await page.goto("/receipts/new");
@@ -105,7 +105,12 @@ test("uploads, reviews, replaces, and removes a multi-page document", async ({
     "prepared pages will be removed",
   );
   await page.getByRole("button", { name: "Confirm remove" }).click();
-  await expect(page.getByText("No document attached yet.")).toBeVisible();
+  await expect(
+    page.getByText(
+      "The document could not be removed. It is still attached; try again.",
+    ),
+  ).toBeVisible();
+  await expect(page.getByText("replacement.png")).toBeVisible();
 });
 
 test("shows failed normalization and retries it accessibly", async ({

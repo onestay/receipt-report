@@ -18,6 +18,7 @@ import {
 } from "@receipt-report/database";
 import {
   createDeterministicFakeReceiptExtractor,
+  receiptExtractionSchema,
   ReceiptExtractionError,
   type ReceiptExtractor,
 } from "@receipt-report/receipt-ai";
@@ -182,6 +183,184 @@ describe("extraction processor", () => {
     expect(JSON.parse(attempt.validatedOutput ?? "{}")).toMatchObject({
       schemaVersion: "receipt-extraction-v1",
     });
+    const proposal = await database.extractionProposal.findFirstOrThrow({
+      include: { findings: true },
+    });
+    expect(JSON.parse(proposal.snapshot)).toMatchObject({
+      merchantRaw: "",
+      lineItems: [],
+    });
+    expect(proposal.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "required_merchant",
+          severity: "blocking",
+        }),
+      ]),
+    );
+    expect(
+      await database.receipt.findUniqueOrThrow({
+        where: {
+          id: (
+            await database.receiptDocument.findUniqueOrThrow({
+              where: { id: document.id },
+            })
+          ).receiptId,
+        },
+      }),
+    ).toMatchObject({ merchantRaw: "Synthetic extraction", totalCents: 1 });
+  });
+
+  it("publishes provenance-bearing category suggestions with store precedence", async () => {
+    const { receipt, document, job } = await seed();
+    const storedJob = requireJob(job);
+    const brand = await database.merchantBrand.create({
+      data: { name: "Markt", normalizedName: "markt" },
+    });
+    const store = await database.merchantStore.create({
+      data: {
+        brandId: brand.id,
+        name: "Filiale",
+        normalizedName: "filiale",
+        normalizedAddressKey: "",
+      },
+    });
+    await database.receipt.update({
+      where: { id: receipt.id },
+      data: { merchantBrandId: brand.id, merchantStoreId: store.id },
+    });
+    const categories = await Promise.all(
+      ["Global", "Brand", "Store"].map((name, position) =>
+        database.category.create({
+          data: {
+            name,
+            normalizedName: name.toLowerCase(),
+            position: 100 + position,
+          },
+        }),
+      ),
+    );
+    const [globalCategory, brandCategory, storeCategory] = categories;
+    if (!globalCategory || !brandCategory || !storeCategory)
+      throw new Error("Missing category fixture");
+    await database.categorySuggestionRule.createMany({
+      data: [
+        {
+          description: "Apfel",
+          normalizedDescription: "apfel",
+          scopeKind: "global",
+          scopeSpecificity: 0,
+          scopeIdentity: "global",
+          categoryId: globalCategory.id,
+        },
+        {
+          description: "Apfel",
+          normalizedDescription: "apfel",
+          scopeKind: "brand",
+          scopeSpecificity: 1,
+          scopeIdentity: brand.id,
+          categoryId: brandCategory.id,
+          brandId: brand.id,
+        },
+        {
+          description: "Apfel",
+          normalizedDescription: "apfel",
+          scopeKind: "store",
+          scopeSpecificity: 2,
+          scopeIdentity: store.id,
+          categoryId: storeCategory.id,
+          brandId: brand.id,
+          storeId: store.id,
+        },
+      ],
+    });
+    const oldAttempt = await database.extractionAttempt.create({
+      data: {
+        jobId: storedJob.id,
+        attemptNumber: 1,
+        provider: "fake",
+        model: "old-fake-v1",
+        extractionProfileVersion: "de-receipt-v1",
+        status: "succeeded",
+      },
+    });
+    const oldProposal = await database.extractionProposal.create({
+      data: {
+        receiptId: receipt.id,
+        documentId: document.id,
+        attemptId: oldAttempt.id,
+        normalizationRevision: "revision-1",
+        extractionProfileVersion: "de-receipt-v1",
+        snapshot: "{}",
+      },
+    });
+    await database.extractionJob.update({
+      where: { id: storedJob.id },
+      data: { attempts: 1 },
+    });
+    const absent = { value: null, confidence: null } as const;
+    const structured = receiptExtractionSchema.parse({
+      schemaVersion: "receipt-extraction-v1",
+      profileVersion: "de-receipt-v1",
+      merchantText: { value: "Markt", confidence: 0.9 },
+      purchaseDate: { value: "2026-07-31", confidence: 0.9 },
+      purchaseTime: absent,
+      currency: { value: "EUR", confidence: 1 },
+      grossTotalCents: { value: 100, confidence: 0.9 },
+      netTotalCents: absent,
+      taxTotalCents: absent,
+      taxBreakdowns: [],
+      lineItems: [
+        {
+          position: 0,
+          description: { value: "  APFEL ", confidence: 0.9 },
+          quantityMilli: absent,
+          unit: absent,
+          unitPriceCents: absent,
+          lineTotalCents: { value: 100, confidence: 0.9 },
+        },
+      ],
+      warnings: [],
+    });
+    await processor({
+      name: "fake",
+      async extract() {
+        return {
+          documentId: document.id,
+          provider: "fake",
+          model: "fake-v1",
+          rawProviderOutput: JSON.stringify(structured),
+          structured,
+        };
+      },
+    }).processNext();
+    const proposal = await database.extractionProposal.findFirstOrThrow({
+      where: { status: "pending", NOT: { id: oldProposal.id } },
+      include: { findings: true },
+    });
+    expect(JSON.parse(proposal.snapshot)).toMatchObject({
+      merchantBrandId: brand.id,
+      merchantStoreId: store.id,
+      lineItems: [
+        {
+          categoryId: null,
+          categorySuggestion: {
+            categoryId: storeCategory.id,
+            scopeKind: "store",
+          },
+        },
+      ],
+    });
+    expect(proposal.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "category_suggestion" }),
+      ]),
+    );
+    await expect(
+      database.extractionProposal.findUniqueOrThrow({
+        where: { id: oldProposal.id },
+      }),
+    ).resolves.toMatchObject({ status: "superseded" });
   });
 
   it("allows only one live claim across concurrent processors", async () => {

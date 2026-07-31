@@ -711,9 +711,7 @@ describe("receipt editor", () => {
     fireEvent.change(screen.getByLabelText("Receipt total"), {
       target: { value: "4,00" },
     });
-    expect(screen.getByRole("status", { name: "" })).toHaveTextContent(
-      "Difference",
-    );
+    expect(screen.getByText(/Difference:/)).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Move item 2 up" }));
     await waitFor(() =>
       expect(screen.getAllByLabelText("Description")[0]).toHaveFocus(),

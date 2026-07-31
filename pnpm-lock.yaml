@@ -68,6 +68,9 @@ importers:
       '@receipt-report/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@receipt-report/receipt-ai':
+        specifier: workspace:*
+        version: link:../../packages/receipt-ai
       busboy:
         specifier: 1.6.0
         version: 1.6.0

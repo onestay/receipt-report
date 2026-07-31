@@ -9,9 +9,11 @@ import {
   type ReceiptUpdate,
 } from "@receipt-report/contracts";
 import {
+  ConflictError,
   InvalidCursorError,
   InvalidReferenceError,
   NotFoundError,
+  prismaErrorCode,
 } from "./errors.js";
 
 type Cursor = { purchaseDate: string; id: string };
@@ -75,6 +77,7 @@ function detail(record: ReceiptWithItems): ReceiptDetail {
       quantityMilli: item.quantityMilli,
       unitPriceCents: item.unitPriceCents,
       lineTotalCents: item.lineTotalCents,
+      kind: item.kind,
       categoryId: item.categoryId,
       position: item.position,
     })),
@@ -141,6 +144,7 @@ function itemData(item: ReceiptItem, position: number) {
     quantityMilli: item.quantityMilli ?? null,
     unitPriceCents: item.unitPriceCents ?? null,
     lineTotalCents: item.lineTotalCents,
+    kind: item.kind,
     categoryId: item.categoryId ?? null,
     position,
   };
@@ -221,6 +225,8 @@ export class ReceiptRepository {
           currency: input.currency,
           notes: input.notes || null,
           totalCents: input.totalCents,
+          netCents: input.netCents ?? null,
+          taxCents: input.taxCents ?? null,
           lineItems: {
             create: input.lineItems.map(itemData),
           },
@@ -317,6 +323,8 @@ export class ReceiptRepository {
           ...(input.totalCents === undefined
             ? {}
             : { totalCents: input.totalCents }),
+          ...(input.netCents === undefined ? {} : { netCents: input.netCents }),
+          ...(input.taxCents === undefined ? {} : { taxCents: input.taxCents }),
           ...(input.lineItems === undefined
             ? {}
             : {
@@ -332,7 +340,15 @@ export class ReceiptRepository {
   }
 
   async delete(id: string): Promise<void> {
-    const result = await this.database.receipt.deleteMany({ where: { id } });
-    if (result.count === 0) throw new NotFoundError("Receipt not found");
+    try {
+      const result = await this.database.receipt.deleteMany({ where: { id } });
+      if (result.count === 0) throw new NotFoundError("Receipt not found");
+    } catch (error) {
+      if (["P2003", "P2014"].includes(prismaErrorCode(error) ?? ""))
+        throw new ConflictError(
+          "Receipt with retained document or extraction history cannot be deleted",
+        );
+      throw error;
+    }
   }
 }

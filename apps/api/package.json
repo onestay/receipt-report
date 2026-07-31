@@ -14,6 +14,7 @@
     "@receipt-report/config": "workspace:*",
     "@receipt-report/contracts": "workspace:*",
     "@receipt-report/database": "workspace:*",
+    "@receipt-report/receipt-ai": "workspace:*",
     "busboy": "1.6.0",
     "express": "5.2.1",
     "file-type": "21.3.0",
