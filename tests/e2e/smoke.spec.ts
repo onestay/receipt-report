@@ -127,6 +127,12 @@ test("creates a category hierarchy and bulk assigns receipt lines", async ({
   const childName = `Synthetic Bakery ${suffix}`;
 
   await page.goto("/categories");
+  const categoryCreate = page.locator(".category-create");
+  await expect(categoryCreate).toHaveCSS("display", "grid");
+  await expect(page.locator("#category-name")).toHaveCSS(
+    "border-radius",
+    "11.2px",
+  );
   await page.locator("#category-name").fill(parentName);
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await expect(page.getByText("Category created.")).toBeVisible();
@@ -148,6 +154,11 @@ test("creates a category hierarchy and bulk assigns receipt lines", async ({
   });
   const receipt = (await receiptResponse.json()) as { id: string };
   await page.goto(`/receipts/${receipt.id}`);
+  await expect(page.locator(".bulk-category")).toHaveCSS("display", "grid");
+  await expect(page.locator("#bulk-category")).toHaveCSS(
+    "border-radius",
+    "10.4px",
+  );
   await page.getByRole("checkbox", { name: "Item 1" }).check();
   await page.getByRole("checkbox", { name: "Item 2" }).check();
   await page
