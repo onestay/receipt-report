@@ -231,13 +231,16 @@ export class MerchantRepository {
   /** Restrictive: a brand with stores or linked receipts cannot be deleted. */
   async deleteBrand(id: string): Promise<void> {
     await this.getBrand(id);
-    const [stores, receipts] = await Promise.all([
+    const [stores, receipts, suggestionRules] = await Promise.all([
       this.database.merchantStore.count({ where: { brandId: id } }),
       this.database.receipt.count({ where: { merchantBrandId: id } }),
+      this.database.categorySuggestionRule.count({ where: { brandId: id } }),
     ]);
-    if (stores > 0 || receipts > 0) {
+    if (stores > 0 || receipts > 0 || suggestionRules > 0) {
       throw new ConflictError(
-        "Merchant brand still has stores or linked receipts",
+        suggestionRules > 0
+          ? "Merchant brand still has suggestion rules"
+          : "Merchant brand still has stores or linked receipts",
       );
     }
     try {
@@ -340,11 +343,16 @@ export class MerchantRepository {
   /** Restrictive: a store linked from a receipt cannot be deleted. */
   async deleteStore(id: string): Promise<void> {
     await this.getStore(id);
-    const receipts = await this.database.receipt.count({
-      where: { merchantStoreId: id },
-    });
-    if (receipts > 0) {
-      throw new ConflictError("Merchant store still has linked receipts");
+    const [receipts, suggestionRules] = await Promise.all([
+      this.database.receipt.count({ where: { merchantStoreId: id } }),
+      this.database.categorySuggestionRule.count({ where: { storeId: id } }),
+    ]);
+    if (receipts > 0 || suggestionRules > 0) {
+      throw new ConflictError(
+        suggestionRules > 0
+          ? "Merchant store still has suggestion rules"
+          : "Merchant store still has linked receipts",
+      );
     }
     try {
       await this.database.merchantStore.delete({ where: { id } });

@@ -41,6 +41,9 @@ export const normalizeMerchantName = normalizeCanonicalName;
 /** Category sibling uniqueness uses the same German canonical-name rules. */
 export const normalizeCategoryName = normalizeCanonicalName;
 
+/** Exact category rules deliberately use the same pinned German normalization. */
+export const normalizeRuleDescription = normalizeCanonicalName;
+
 /** Separator that cannot occur in user-entered address text. */
 const addressKeySeparator = "\u001F";
 
@@ -242,6 +245,106 @@ export const categorySchema = z.object({
 
 export const categoryListSchema = z.object({
   categories: z.array(categorySchema),
+});
+
+export const categorySuggestionScopeSchema = z.enum([
+  "global",
+  "brand",
+  "store",
+]);
+
+const categorySuggestionScopeFields = {
+  scopeKind: categorySuggestionScopeSchema,
+  brandId: idSchema.nullish(),
+  storeId: idSchema.nullish(),
+};
+
+function validateSuggestionScope(
+  value: {
+    scopeKind: "global" | "brand" | "store";
+    brandId?: string | null | undefined;
+    storeId?: string | null | undefined;
+  },
+  context: z.RefinementCtx,
+): void {
+  const brandId = value.brandId ?? null;
+  const storeId = value.storeId ?? null;
+  const valid =
+    (value.scopeKind === "global" && brandId === null && storeId === null) ||
+    (value.scopeKind === "brand" && brandId !== null && storeId === null) ||
+    (value.scopeKind === "store" && brandId !== null && storeId !== null);
+  if (!valid) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Scope IDs do not match scopeKind",
+    });
+  }
+}
+
+export const categorySuggestionRuleCreateSchema = z
+  .object({
+    description: trimmedNonEmptyText,
+    categoryId: idSchema,
+    ...categorySuggestionScopeFields,
+  })
+  .strict()
+  .superRefine(validateSuggestionScope);
+
+export const categorySuggestionRuleUpdateSchema =
+  categorySuggestionRuleCreateSchema;
+
+export const categorySuggestionRuleSchema = z.object({
+  id: idSchema,
+  description: z.string().min(1),
+  normalizedDescription: z.string().min(1),
+  scopeKind: categorySuggestionScopeSchema,
+  categoryId: idSchema,
+  category: categorySchema,
+  brandId: idSchema.nullable(),
+  storeId: idSchema.nullable(),
+  isValid: z.boolean(),
+  invalidReason: z.string().nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+export const categorySuggestionRuleListQuerySchema = z.object({
+  query: z
+    .string()
+    .transform((value) => value.trim())
+    .optional(),
+  validity: z.enum(["valid", "invalid"]).optional(),
+  scopeKind: categorySuggestionScopeSchema.optional(),
+  categoryId: idSchema.optional(),
+  brandId: idSchema.optional(),
+  storeId: idSchema.optional(),
+  limit: z.coerce.number().int().positive().max(100).default(25),
+  cursor: z.string().min(1).optional(),
+});
+
+export const categorySuggestionRuleListSchema = z.object({
+  rules: z.array(categorySuggestionRuleSchema),
+  nextCursor: z.string().nullable(),
+});
+
+export const categorySuggestionQuerySchema = z
+  .object({
+    description: trimmedNonEmptyText,
+    brandId: idSchema.optional(),
+    storeId: idSchema.optional(),
+  })
+  .superRefine((value, context) => {
+    if (value.storeId && !value.brandId) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["brandId"],
+        message: "brandId is required when storeId is set",
+      });
+    }
+  });
+
+export const categorySuggestionSchema = z.object({
+  suggestion: categorySuggestionRuleSchema.nullable(),
 });
 
 /**
@@ -482,6 +585,28 @@ export type CategoryReorder = z.infer<typeof categoryReorderSchema>;
 export type CategoryListQuery = z.infer<typeof categoryListQuerySchema>;
 export type Category = z.infer<typeof categorySchema>;
 export type CategoryList = z.infer<typeof categoryListSchema>;
+export type CategorySuggestionScope = z.infer<
+  typeof categorySuggestionScopeSchema
+>;
+export type CategorySuggestionRuleCreate = z.infer<
+  typeof categorySuggestionRuleCreateSchema
+>;
+export type CategorySuggestionRuleUpdate = z.infer<
+  typeof categorySuggestionRuleUpdateSchema
+>;
+export type CategorySuggestionRule = z.infer<
+  typeof categorySuggestionRuleSchema
+>;
+export type CategorySuggestionRuleListQuery = z.infer<
+  typeof categorySuggestionRuleListQuerySchema
+>;
+export type CategorySuggestionRuleList = z.infer<
+  typeof categorySuggestionRuleListSchema
+>;
+export type CategorySuggestionQuery = z.infer<
+  typeof categorySuggestionQuerySchema
+>;
+export type CategorySuggestion = z.infer<typeof categorySuggestionSchema>;
 export type LineItemInput = z.infer<typeof lineItemInputSchema>;
 export type LineItem = z.infer<typeof lineItemSchema>;
 export type ReceiptCreate = z.infer<typeof receiptCreateSchema>;

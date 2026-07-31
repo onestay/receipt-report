@@ -170,3 +170,75 @@ test("creates a category hierarchy and bulk assigns receipt lines", async ({
     page.getByLabel("Category", { exact: true }).nth(1),
   ).not.toHaveValue("");
 });
+
+test("remembers, suggests, replaces, and repairs an exact category rule", async ({
+  page,
+  request,
+}) => {
+  const suffix = crypto.randomUUID().slice(0, 8);
+  const description = `Synthetic exact item ${suffix}`;
+  const firstCategoryResponse = await request.post("/api/v1/categories", {
+    data: { name: `Synthetic rule A ${suffix}`, parentId: null },
+  });
+  const secondCategoryResponse = await request.post("/api/v1/categories", {
+    data: { name: `Synthetic rule B ${suffix}`, parentId: null },
+  });
+  const firstCategory = (await firstCategoryResponse.json()) as {
+    id: string;
+    name: string;
+  };
+  const secondCategory = (await secondCategoryResponse.json()) as {
+    id: string;
+    name: string;
+  };
+  const makeReceipt = async () => {
+    const response = await request.post("/api/v1/receipts", {
+      data: {
+        merchantRaw: "Synthetic Rule Markt",
+        purchaseDate: "2026-07-31",
+        totalCents: 100,
+        lineItems: [{ description, lineTotalCents: 100 }],
+      },
+    });
+    return (await response.json()) as { id: string };
+  };
+
+  const corrected = await makeReceipt();
+  await page.goto(`/receipts/${corrected.id}`);
+  await page
+    .getByLabel("Category", { exact: true })
+    .selectOption(firstCategory.id);
+  await page.getByRole("button", { name: "Remember", exact: true }).click();
+  await expect(
+    page.getByText("Rule remembered for future receipts."),
+  ).toBeVisible();
+
+  const future = await makeReceipt();
+  await page.goto(`/receipts/${future.id}`);
+  await expect(
+    page.getByText(`Suggested: ${firstCategory.name} · global`),
+  ).toBeVisible();
+  await expect(page.getByLabel("Category", { exact: true })).toHaveValue("");
+  await page.getByRole("button", { name: "Adopt suggestion" }).click();
+  await expect(page.getByLabel("Category", { exact: true })).toHaveValue(
+    firstCategory.id,
+  );
+
+  await page
+    .getByLabel("Category", { exact: true })
+    .selectOption(secondCategory.id);
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Remember", exact: true }).click();
+  await expect(
+    page.getByText("Existing rule replaced after confirmation."),
+  ).toBeVisible();
+
+  await request.post(`/api/v1/categories/${secondCategory.id}/archive`);
+  await page.goto("/category-rules");
+  await page.getByLabel("Validity").selectOption("invalid");
+  await expect(
+    page.getByText(/Needs repair: Target category is archived/),
+  ).toBeVisible();
+  await page.getByLabel("Repair target").selectOption(firstCategory.id);
+  await expect(page.getByText("Rule updated.")).toBeVisible();
+});

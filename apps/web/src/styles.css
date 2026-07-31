@@ -485,6 +485,25 @@ h1 {
   margin-bottom: 0.8rem;
   color: #9b3027;
 }
+.suggestion-advice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 0.55rem;
+  background: var(--sage);
+  font-size: 0.85rem;
+}
+.suggestion-advice label {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.suggestion-advice select {
+  width: auto;
+}
 .money-input {
   position: relative;
 }

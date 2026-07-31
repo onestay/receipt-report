@@ -47,6 +47,10 @@ function stubAppFetch(
       return Promise.resolve(
         new Response(JSON.stringify({ categories: [] }), { status: 200 }),
       );
+    if (url.startsWith("/api/v1/category-suggestion-rules/suggestion?"))
+      return Promise.resolve(
+        new Response(JSON.stringify({ suggestion: null }), { status: 200 }),
+      );
     if (/\/api\/v1\/receipts\/[^/]+\/document$/.test(url) && !init?.method)
       return Promise.resolve(new Response(null, { status: 404 }));
     return receiptFetch(input, init);

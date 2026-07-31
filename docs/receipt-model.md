@@ -179,10 +179,26 @@ failed save preserves every category and field edit together.
 
 ## Categorization rule
 
-Transparent category correction rules are deferred to issue #29. This taxonomy
-does not introduce product identity, preferred-product mappings, fuzzy matching,
-or automatic mutation of line-item assignments. Explicit user choices will
-continue to override later suggestions.
+Transparent category correction rules map one exact German-normalized line
+description to one category at an explicit global, brand, or store scope. Store
+rules take precedence over brand rules and brand rules over global rules. The
+original receipt description is never rewritten.
+
+A suggestion is UI advice only. An uncategorized line displays its current
+suggestion and provenance, but adopting it requires an explicit action and the
+ordinary receipt save. An existing explicit category always wins. Changing a
+line description or receipt merchant identity recomputes only the displayed
+suggestion and never clears or replaces a selected category.
+
+Rules retain stable identity and unconditional uniqueness even if a target
+category later becomes archived or non-leaf. Such a rule remains visible for
+repair but produces no suggestion. Referenced categories, brands, and stores
+cannot be deleted until the rule is repaired or removed.
+
+Normalized rule descriptions may contain sensitive purchase text. They remain
+in the local SQLite database unless a later, explicitly configured AI request
+sends them. Product identity, preferred product names, catalogs, fuzzy matching,
+and model-based categorization remain separate deferred work.
 
 ## German receipt considerations
 
