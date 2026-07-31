@@ -4,6 +4,10 @@ import express, { type ErrorRequestHandler, type Express } from "express";
 import type { ApiConfig } from "@receipt-report/config";
 import {
   apiErrorSchema,
+  categorySuggestionQuerySchema,
+  categorySuggestionRuleCreateSchema,
+  categorySuggestionRuleListQuerySchema,
+  categorySuggestionRuleUpdateSchema,
   categoryCreateSchema,
   categoryListQuerySchema,
   categoryReorderSchema,
@@ -38,6 +42,7 @@ import {
   prismaErrorCode,
 } from "./errors.js";
 import { CategoryRepository } from "./categories.js";
+import { CategorySuggestionRuleRepository } from "./category-suggestion-rules.js";
 import { DocumentRepository } from "./documents.js";
 import { MerchantRepository } from "./merchants.js";
 import { stageMultipartDocument } from "./multipart.js";
@@ -148,6 +153,92 @@ export function createApp(options: AppOptions = {}): Express {
         next(error);
       }
     });
+
+    const suggestionRules = new CategorySuggestionRuleRepository(
+      options.database,
+    );
+    app.get(
+      "/api/v1/category-suggestion-rules/suggestion",
+      async (request, response, next) => {
+        try {
+          response.json(
+            await suggestionRules.suggest(
+              categorySuggestionQuerySchema.parse(request.query),
+            ),
+          );
+        } catch (error) {
+          next(error);
+        }
+      },
+    );
+    app.get(
+      "/api/v1/category-suggestion-rules",
+      async (request, response, next) => {
+        try {
+          response.json(
+            await suggestionRules.list(
+              categorySuggestionRuleListQuerySchema.parse(request.query),
+            ),
+          );
+        } catch (error) {
+          next(error);
+        }
+      },
+    );
+    app.post(
+      "/api/v1/category-suggestion-rules",
+      async (request, response, next) => {
+        try {
+          response
+            .status(201)
+            .json(
+              await suggestionRules.create(
+                categorySuggestionRuleCreateSchema.parse(request.body),
+              ),
+            );
+        } catch (error) {
+          next(error);
+        }
+      },
+    );
+    app.get(
+      "/api/v1/category-suggestion-rules/:id",
+      async (request, response, next) => {
+        try {
+          response.json(
+            await suggestionRules.get(idSchema.parse(request.params.id)),
+          );
+        } catch (error) {
+          next(error);
+        }
+      },
+    );
+    app.patch(
+      "/api/v1/category-suggestion-rules/:id",
+      async (request, response, next) => {
+        try {
+          response.json(
+            await suggestionRules.update(
+              idSchema.parse(request.params.id),
+              categorySuggestionRuleUpdateSchema.parse(request.body),
+            ),
+          );
+        } catch (error) {
+          next(error);
+        }
+      },
+    );
+    app.delete(
+      "/api/v1/category-suggestion-rules/:id",
+      async (request, response, next) => {
+        try {
+          await suggestionRules.delete(idSchema.parse(request.params.id));
+          response.status(204).end();
+        } catch (error) {
+          next(error);
+        }
+      },
+    );
 
     const merchants = new MerchantRepository(options.database);
     app.get("/api/v1/merchant-brands", async (request, response, next) => {

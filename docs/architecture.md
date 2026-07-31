@@ -60,6 +60,7 @@ Versioned REST resources are flat rather than nested:
 | --------------------------------------- | --------------------------------------------------- |
 | `/api/v1/receipts`                      | Receipt CRUD and list                               |
 | `/api/v1/categories`                    | Spending-taxonomy lifecycle and deterministic order |
+| `/api/v1/category-suggestion-rules`     | Transparent exact-match category advice             |
 | `/api/v1/merchant-brands`               | Canonical merchant brand CRUD and list              |
 | `/api/v1/merchant-stores`               | Store CRUD and list, filtered by `brandId`          |
 | `/api/v1/document-upload-configuration` | Active media-type and byte-size upload limits       |
@@ -92,6 +93,16 @@ archive and restore actions preserve independent child archive timestamps, and
 delete is restrictive. Receipt line items carry one nullable `categoryId`, and
 the API accepts new assignments only to effectively active leaves.
 
+Category suggestion rules store the original display description beside its
+German-normalized exact-match key and one explicit global, brand, or store
+scope. Lists use deterministic keyset order by normalized description, scope
+specificity (global, brand, store), then stable ID. Store matches take
+precedence over brand matches, which take precedence over global matches.
+Targets that later become archived, effectively archived, or non-leaf remain
+stored and unique but are flagged as invalid and excluded from suggestions
+until repaired or deleted. Rule-backed category and merchant deletion is
+restrictive.
+
 The public error taxonomy is `validation_error`, `invalid_cursor`, `not_found`,
 `conflict`, document-ingestion errors, and `internal_error`. Document ingestion
 uses stable `document_too_large`, `unsupported_document`, `malformed_document`,
@@ -115,7 +126,8 @@ ends when the first real deployment carries data worth preserving.
 SQLite is the primary database and should use WAL mode where deployment permits.
 The database and receipt document directory must be mountable and backable up
 together. Canonical merchant brands, stores, the editable category taxonomy,
-and line-item assignments live in the same SQLite database as receipts, so an
+transparent category suggestion rules and line-item assignments live in the
+same SQLite database as receipts, so an
 existing backup or restore covers both grouping systems with no additional
 step. A restore that predates a brand or category still referenced by a receipt
 would fail its foreign key, so database and documents must be restored as one

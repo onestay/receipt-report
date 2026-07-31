@@ -308,9 +308,18 @@ export class CategoryRepository {
       const assignments = await transaction.lineItem.count({
         where: { categoryId: id },
       });
-      if (existing._count.children > 0 || assignments > 0) {
+      const suggestionRules = await transaction.categorySuggestionRule.count({
+        where: { categoryId: id },
+      });
+      if (
+        existing._count.children > 0 ||
+        assignments > 0 ||
+        suggestionRules > 0
+      ) {
         throw new ConflictError(
-          "Category still has children or line-item assignments",
+          suggestionRules > 0
+            ? "Category still has suggestion rules"
+            : "Category still has children or line-item assignments",
         );
       }
       await transaction.category.delete({ where: { id } });

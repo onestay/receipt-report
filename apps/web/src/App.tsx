@@ -2,6 +2,7 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
   apiErrorSchema,
   categorySchema,
+  categorySuggestionSchema,
   merchantBrandListSchema,
   merchantBrandSchema,
   merchantStoreListSchema,
@@ -13,6 +14,7 @@ import {
   type MerchantBrand,
   type MerchantStore,
   type Category,
+  type CategorySuggestionRule,
   type ReceiptDetail,
   type ReceiptSummary,
 } from "@receipt-report/contracts";
@@ -23,6 +25,10 @@ import {
   loadCategories,
 } from "./Categories.js";
 import {
+  CategorySuggestionRuleManager,
+  rememberCategoryRule,
+} from "./CategorySuggestionRules.js";
+import {
   DocumentFileField,
   DocumentPanel,
   DocumentUploadError,
@@ -30,7 +36,10 @@ import {
   uploadReceiptDocument,
 } from "./DocumentPanel.js";
 
-type Route = { page: "list" | "new" | "detail" | "categories"; id?: string };
+type Route = {
+  page: "list" | "new" | "detail" | "categories" | "category-rules";
+  id?: string;
+};
 const money = new Intl.NumberFormat("de-DE", {
   style: "currency",
   currency: "EUR",
@@ -40,6 +49,8 @@ let ignoreNextPop = false;
 
 function route(): Route {
   if (location.pathname === "/categories") return { page: "categories" };
+  if (location.pathname === "/category-rules")
+    return { page: "category-rules" };
   if (location.pathname === "/receipts/new") return { page: "new" };
   const match = location.pathname.match(/^\/receipts\/([^/]+)$/);
   return match?.[1] ? { page: "detail", id: match[1] } : { page: "list" };
@@ -97,7 +108,7 @@ export function App() {
     return () => window.removeEventListener("popstate", update);
   }, []);
   useEffect(() => {
-    document.title = `${current.page === "list" ? "Ledger" : current.page === "new" ? "New receipt" : current.page === "categories" ? "Categories" : "Receipt detail"} · Receipt Report`;
+    document.title = `${current.page === "list" ? "Ledger" : current.page === "new" ? "New receipt" : current.page === "categories" ? "Categories" : current.page === "category-rules" ? "Category rules" : "Receipt detail"} · Receipt Report`;
     const main = document.querySelector("main");
     const heading = document.querySelector<HTMLElement>("main h1");
     if (heading && !main?.contains(document.activeElement)) {
@@ -118,6 +129,7 @@ export function App() {
         <nav aria-label="Primary">
           <Link href="/receipts">Ledger</Link>
           <Link href="/categories">Categories</Link>
+          <Link href="/category-rules">Rules</Link>
           <Link href="/receipts/new" className="button button--small">
             New receipt
           </Link>
@@ -130,6 +142,7 @@ export function App() {
           <ReceiptEditor id={current.id} />
         )}
         {current.page === "categories" && <CategoryManager />}
+        {current.page === "category-rules" && <CategorySuggestionRuleManager />}
       </main>
       <footer>Quietly kept on your own server.</footer>
     </div>
@@ -1022,6 +1035,133 @@ export function lineTotalSum<T extends Pick<EditorValues, "items">>(
   return total;
 }
 
+export function CategorySuggestionAdvice({
+  description,
+  categoryId,
+  brandId,
+  storeId,
+  categories,
+  onAdopt,
+  onStatus,
+}: {
+  description: string;
+  categoryId: string | null;
+  brandId: string | null;
+  storeId: string | null;
+  categories: Category[];
+  onAdopt: (categoryId: string) => void;
+  onStatus: (message: string) => void;
+}) {
+  const [suggestion, setSuggestion] = useState<CategorySuggestionRule | null>(
+    null,
+  );
+  const [scope, setScope] = useState<"global" | "brand" | "store">("global");
+  const [remembering, setRemembering] = useState(false);
+  useEffect(() => {
+    const controller = new AbortController();
+    const trimmed = description.trim();
+    if (!trimmed || categoryId) {
+      setSuggestion(null);
+      return () => controller.abort();
+    }
+    const parameters = new URLSearchParams({ description: trimmed });
+    if (brandId) parameters.set("brandId", brandId);
+    if (storeId) parameters.set("storeId", storeId);
+    void fetch(`/api/v1/category-suggestion-rules/suggestion?${parameters}`, {
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("suggestion");
+        return categorySuggestionSchema.parse(await response.json()).suggestion;
+      })
+      .then(setSuggestion)
+      .catch((error: unknown) => {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          setSuggestion(null);
+        }
+      });
+    return () => controller.abort();
+  }, [description, categoryId, brandId, storeId]);
+  useEffect(() => {
+    if (!brandId) setScope("global");
+    else if (!storeId && scope === "store") setScope("brand");
+  }, [brandId, storeId, scope]);
+
+  async function remember() {
+    if (!categoryId) return;
+    setRemembering(true);
+    try {
+      const result = await rememberCategoryRule({
+        description,
+        categoryId,
+        scopeKind: scope,
+        brandId: scope === "global" ? null : brandId,
+        storeId: scope === "store" ? storeId : null,
+      });
+      onStatus(
+        result === "created"
+          ? "Rule remembered for future receipts."
+          : result === "replaced"
+            ? "Existing rule replaced after confirmation."
+            : "Existing rule left unchanged.",
+      );
+    } catch {
+      onStatus("The rule could not be remembered. Your receipt is unchanged.");
+    } finally {
+      setRemembering(false);
+    }
+  }
+
+  if (suggestion && !categoryId) {
+    return (
+      <div className="suggestion-advice">
+        <span>
+          Suggested: {categoryLabel(suggestion.category, categories)} ·{" "}
+          {suggestion.scopeKind === "global"
+            ? "global"
+            : suggestion.scopeKind === "brand"
+              ? `brand ${suggestion.brand?.name ?? ""}`
+              : `store ${suggestion.store?.name ?? ""}`}
+        </span>
+        <button
+          type="button"
+          className="button button--quiet button--small"
+          onClick={() => onAdopt(suggestion.categoryId)}
+        >
+          Adopt suggestion
+        </button>
+      </div>
+    );
+  }
+  if (!categoryId || !description.trim()) return null;
+  return (
+    <div className="suggestion-advice">
+      <label>
+        Remember for future{" "}
+        <select
+          aria-label={`Remember scope for ${description}`}
+          value={scope}
+          onChange={(event) =>
+            setScope(event.target.value as "global" | "brand" | "store")
+          }
+        >
+          <option value="global">Globally</option>
+          {brandId && <option value="brand">For this brand</option>}
+          {storeId && <option value="store">For this store</option>}
+        </select>
+      </label>
+      <button
+        type="button"
+        className="button button--quiet button--small"
+        disabled={remembering}
+        onClick={() => void remember()}
+      >
+        {remembering ? "Remembering…" : "Remember"}
+      </button>
+    </div>
+  );
+}
+
 function ReceiptEditor({ id }: { id: string }) {
   const [loadState, setLoadState] = useState<
     "loading" | "ready" | "not-found" | "error"
@@ -1610,6 +1750,20 @@ function ReceiptEditor({ id }: { id: string }) {
                     <small>
                       Use Ctrl + ↑/↓ to move between category controls.
                     </small>
+                    <CategorySuggestionAdvice
+                      description={item.description}
+                      categoryId={item.categoryId ?? null}
+                      brandId={values.merchantBrandId}
+                      storeId={values.merchantStoreId}
+                      categories={categories}
+                      onAdopt={(categoryId) => {
+                        updateItem(index, "categoryId", categoryId);
+                        setStatus(
+                          "Suggestion adopted locally. Save the receipt to keep it.",
+                        );
+                      }}
+                      onStatus={setStatus}
+                    />
                   </div>
                   <EditorField
                     label="Quantity"

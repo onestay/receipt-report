@@ -4,6 +4,8 @@ import {
   categoryListQuerySchema,
   categoryReorderSchema,
   categorySchema,
+  categorySuggestionQuerySchema,
+  categorySuggestionRuleCreateSchema,
   categoryUpdateSchema,
   healthResponseSchema,
   merchantStoreCreateSchema,
@@ -11,6 +13,7 @@ import {
   normalizeMerchantAddressKey,
   normalizeCategoryName,
   normalizeMerchantName,
+  normalizeRuleDescription,
   receiptCreateSchema,
   receiptDateSchema,
   receiptDocumentSchema,
@@ -46,6 +49,51 @@ describe("healthResponseSchema", () => {
         version: "v1",
       }),
     ).toThrow();
+  });
+});
+
+describe("category suggestion rule contracts", () => {
+  it("reuses German canonical normalization without rewriting display text", () => {
+    expect(normalizeRuleDescription("  ÄPFEL  BIO ")).toBe("äpfel bio");
+    expect(normalizeRuleDescription("Straße")).not.toBe(
+      normalizeRuleDescription("Strasse"),
+    );
+  });
+
+  it("requires scope IDs that match the selected scope", () => {
+    const base = {
+      description: "Synthetic item",
+      categoryId: brandId,
+    };
+    expect(
+      categorySuggestionRuleCreateSchema.safeParse({
+        ...base,
+        scopeKind: "global",
+        brandId: null,
+        storeId: null,
+      }).success,
+    ).toBe(true);
+    expect(
+      categorySuggestionRuleCreateSchema.safeParse({
+        ...base,
+        scopeKind: "store",
+        brandId,
+        storeId,
+      }).success,
+    ).toBe(true);
+    expect(
+      categorySuggestionRuleCreateSchema.safeParse({
+        ...base,
+        scopeKind: "store",
+        brandId,
+      }).success,
+    ).toBe(false);
+    expect(
+      categorySuggestionQuerySchema.safeParse({
+        description: "Item",
+        storeId,
+      }).success,
+    ).toBe(false);
   });
 });
 
