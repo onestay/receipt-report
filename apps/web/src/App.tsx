@@ -35,6 +35,7 @@ import {
   failureMessage,
   uploadReceiptDocument,
 } from "./DocumentPanel.js";
+import { AIReviewPanel, ReceiptLifecycleBadge } from "./AIReviewPanel.js";
 
 type Route = {
   page: "list" | "new" | "detail" | "categories" | "category-rules";
@@ -259,6 +260,7 @@ function ReceiptList() {
                       ? ` · ${receipt.purchaseTime}`
                       : ""} · {receipt.lineItemCount} items
                   </small>
+                  <ReceiptLifecycleBadge receiptId={receipt.id} />
                 </span>
                 <b>{money.format(receipt.totalCents / 100)}</b>
                 <span aria-hidden="true">→</span>
@@ -1183,6 +1185,7 @@ function ReceiptEditor({ id }: { id: string }) {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
+  const [receiptUpdatedAt, setReceiptUpdatedAt] = useState("");
   const [categories, setCategories] = useState<Category[]>([]);
   const [categoryError, setCategoryError] = useState("");
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
@@ -1205,6 +1208,7 @@ function ReceiptEditor({ id }: { id: string }) {
       const next = editorValues(parsed);
       setValues(next);
       setSaved(next);
+      setReceiptUpdatedAt(parsed.updatedAt);
       setLoadState("ready");
     } catch {
       setLoadState("error");
@@ -1375,6 +1379,7 @@ function ReceiptEditor({ id }: { id: string }) {
       const next = editorValues(parsed);
       setValues(next);
       setSaved(next);
+      setReceiptUpdatedAt(parsed.updatedAt);
       setStatus("Receipt saved.");
     } catch {
       setStatus("Could not save. Your changes are still here; try again.");
@@ -1818,7 +1823,16 @@ function ReceiptEditor({ id }: { id: string }) {
           </div>
         </aside>
       </div>
-      <DocumentPanel receiptId={id} />
+      <div className="review-workspace">
+        <AIReviewPanel
+          receiptId={id}
+          receiptUpdatedAt={receiptUpdatedAt}
+          categories={categories}
+          canonicalDirty={dirty}
+          onApproved={load}
+        />
+        <DocumentPanel receiptId={id} />
+      </div>
     </section>
   );
 }
