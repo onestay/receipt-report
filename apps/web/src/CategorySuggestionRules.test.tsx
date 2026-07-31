@@ -402,11 +402,21 @@ describe("category suggestion UI", () => {
         name: "Synthetic Store",
       },
     };
+    const unknownBrandRule = {
+      ...brandRule,
+      id: "cm30000000000000000000004",
+      brand: null,
+    };
+    const unknownStoreRule = {
+      ...storeRule,
+      id: "cm30000000000000000000005",
+      store: null,
+    };
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
       String(input).startsWith("/api/v1/category-suggestion-rules?")
         ? new Response(
             JSON.stringify({
-              rules: [brandRule, storeRule],
+              rules: [brandRule, storeRule, unknownBrandRule, unknownStoreRule],
               nextCursor: null,
             }),
           )
@@ -415,5 +425,64 @@ describe("category suggestion UI", () => {
     render(<CategorySuggestionRuleManager />);
     expect(await screen.findByText(/Brand · Synthetic Brand/)).toBeVisible();
     expect(screen.getByText(/Store · Synthetic Store/)).toBeVisible();
+    expect(screen.getByText(/Brand · Unknown brand/)).toBeVisible();
+    expect(screen.getByText(/Store · Unknown store/)).toBeVisible();
+  });
+
+  it("shows human-readable brand and store suggestion provenance", async () => {
+    const brandRule = {
+      ...rule,
+      scopeKind: "brand" as const,
+      brandId: "cm40000000000000000000001",
+      brand: {
+        id: "cm40000000000000000000001",
+        name: "Synthetic Brand",
+      },
+    };
+    const storeRule = {
+      ...brandRule,
+      scopeKind: "store" as const,
+      storeId: "cm50000000000000000000001",
+      store: {
+        id: "cm50000000000000000000001",
+        brandId: "cm40000000000000000000001",
+        name: "Synthetic Store",
+      },
+    };
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ suggestion: brandRule })),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ suggestion: storeRule })),
+      );
+    const view = render(
+      <CategorySuggestionAdvice
+        description="Brand item"
+        categoryId={null}
+        brandId={brandRule.brandId}
+        storeId={null}
+        categories={[category]}
+        onAdopt={vi.fn()}
+        onStatus={vi.fn()}
+      />,
+    );
+    expect(
+      await screen.findByText(/Suggested: Other · brand Synthetic Brand/),
+    ).toBeVisible();
+    view.rerender(
+      <CategorySuggestionAdvice
+        description="Store item"
+        categoryId={null}
+        brandId={storeRule.brandId}
+        storeId={storeRule.storeId}
+        categories={[category]}
+        onAdopt={vi.fn()}
+        onStatus={vi.fn()}
+      />,
+    );
+    expect(
+      await screen.findByText(/Suggested: Other · store Synthetic Store/),
+    ).toBeVisible();
   });
 });
