@@ -541,6 +541,9 @@ code {
   .masthead {
     height: 4.8rem;
   }
+  .masthead .brand > span:last-child {
+    display: none;
+  }
   .brand small,
   .masthead nav > a:first-child {
     display: none;
