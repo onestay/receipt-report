@@ -212,6 +212,36 @@ describe("AI review panel", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["document status", 1],
+    ["extraction status", 2],
+    ["proposal history", 4],
+  ])("recovers from a transient %s failure", async (failure, calls) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/document"))
+        return failure === "document status"
+          ? response({}, 503)
+          : response(documentResponse);
+      if (url.endsWith("/document/extraction"))
+        return failure === "extraction status"
+          ? response({}, 503)
+          : response(statusResponse);
+      if (url.endsWith("/extraction-proposal")) return response({}, 404);
+      if (url.endsWith("/extraction-proposals"))
+        return failure === "proposal history"
+          ? response({}, 503)
+          : response({ proposals: [], decisions: [] });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ReceiptLifecycleBadge receiptId={receiptId} />);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(calls));
+    expect(screen.queryByLabelText(/^AI:/)).not.toBeInTheDocument();
+  });
+
   it("preserves edits, navigates findings, adopts advice, and approves warnings explicitly", async () => {
     let approvalAttempts = 0;
     let approvalBody: Record<string, unknown> | undefined;
