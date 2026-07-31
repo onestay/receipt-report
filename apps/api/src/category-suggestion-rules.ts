@@ -28,6 +28,8 @@ type Cursor = {
 };
 
 const include = {
+  brand: { select: { id: true, name: true } },
+  store: { select: { id: true, brandId: true, name: true } },
   category: {
     include: {
       parent: { select: { archivedAt: true } },
@@ -259,7 +261,11 @@ export class CategorySuggestionRuleRepository {
     const normalizedQuery = query.query
       ? normalizeRuleDescription(query.query)
       : "";
+    const exactDescription = query.exactDescription
+      ? normalizeRuleDescription(query.exactDescription)
+      : undefined;
     const where: Prisma.CategorySuggestionRuleWhereInput = {
+      ...(exactDescription ? { normalizedDescription: exactDescription } : {}),
       ...(normalizedQuery
         ? { normalizedDescription: { contains: normalizedQuery } }
         : {}),

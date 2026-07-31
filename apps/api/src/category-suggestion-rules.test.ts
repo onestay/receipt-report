@@ -240,6 +240,25 @@ describe("category suggestion rules", () => {
     const second = await category("Failure target B");
     const one = await rule("Conflict one", first.body.id).expect(201);
     await rule("Conflict two", second.body.id).expect(201);
+    await database.categorySuggestionRule.createMany({
+      data: Array.from({ length: 101 }, (_, index) => ({
+        description: `Conflict two ${String(index).padStart(3, "0")}`,
+        normalizedDescription: `conflict two ${String(index).padStart(3, "0")}`,
+        scopeKind: "global",
+        scopeSpecificity: 0,
+        scopeIdentity: "global",
+        categoryId: second.body.id as string,
+      })),
+    });
+    await request(app)
+      .get(
+        `/api/v1/category-suggestion-rules?exactDescription=${encodeURIComponent(" conflict TWO ")}`,
+      )
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.rules).toHaveLength(1);
+        expect(response.body.rules[0].description).toBe("Conflict two");
+      });
     await request(app)
       .patch(`/api/v1/category-suggestion-rules/${one.body.id as string}`)
       .send({
@@ -286,7 +305,10 @@ describe("category suggestion rules", () => {
     await request(app)
       .get("/api/v1/category-suggestion-rules?validity=valid")
       .expect(200)
-      .expect((response) => expect(response.body.rules).toHaveLength(2));
+      .expect((response) => {
+        expect(response.body.rules).toHaveLength(25);
+        expect(response.body.nextCursor).toEqual(expect.any(String));
+      });
   });
 
   it("flags targets that gain children or an archived parent", async () => {

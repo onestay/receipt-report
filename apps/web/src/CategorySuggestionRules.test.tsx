@@ -40,6 +40,8 @@ const rule: CategorySuggestionRule = {
   category,
   brandId: null,
   storeId: null,
+  brand: null,
+  store: null,
   isValid: true,
   invalidReason: null,
   createdAt: "2026-07-31T00:00:00.000Z",
@@ -379,6 +381,10 @@ describe("category suggestion UI", () => {
       id: "cm30000000000000000000002",
       scopeKind: "brand" as const,
       brandId: "cm40000000000000000000001",
+      brand: {
+        id: "cm40000000000000000000001",
+        name: "Synthetic Brand",
+      },
     };
     const storeRule = {
       ...rule,
@@ -386,6 +392,15 @@ describe("category suggestion UI", () => {
       scopeKind: "store" as const,
       brandId: "cm40000000000000000000001",
       storeId: "cm50000000000000000000001",
+      brand: {
+        id: "cm40000000000000000000001",
+        name: "Synthetic Brand",
+      },
+      store: {
+        id: "cm50000000000000000000001",
+        brandId: "cm40000000000000000000001",
+        name: "Synthetic Store",
+      },
     };
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
       String(input).startsWith("/api/v1/category-suggestion-rules?")
@@ -398,9 +413,7 @@ describe("category suggestion UI", () => {
         : new Response(JSON.stringify({ categories: [category] })),
     );
     render(<CategorySuggestionRuleManager />);
-    expect(
-      await screen.findByText(/Brand · cm40000000000000000000001/),
-    ).toBeVisible();
-    expect(screen.getByText(/Store · cm50000000000000000000001/)).toBeVisible();
+    expect(await screen.findByText(/Brand · Synthetic Brand/)).toBeVisible();
+    expect(screen.getByText(/Store · Synthetic Store/)).toBeVisible();
   });
 });

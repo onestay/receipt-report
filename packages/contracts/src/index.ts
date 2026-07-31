@@ -302,6 +302,14 @@ export const categorySuggestionRuleSchema = z.object({
   category: categorySchema,
   brandId: idSchema.nullable(),
   storeId: idSchema.nullable(),
+  brand: z.object({ id: idSchema, name: z.string().min(1) }).nullable(),
+  store: z
+    .object({
+      id: idSchema,
+      brandId: idSchema,
+      name: z.string().min(1),
+    })
+    .nullable(),
   isValid: z.boolean(),
   invalidReason: z.string().nullable(),
   createdAt: z.string().datetime(),
@@ -313,6 +321,7 @@ export const categorySuggestionRuleListQuerySchema = z.object({
     .string()
     .transform((value) => value.trim())
     .optional(),
+  exactDescription: trimmedNonEmptyText.optional(),
   validity: z.enum(["valid", "invalid"]).optional(),
   scopeKind: categorySuggestionScopeSchema.optional(),
   categoryId: idSchema.optional(),

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   apiErrorSchema,
   categorySuggestionRuleListSchema,
+  normalizeRuleDescription,
   type Category,
   type CategorySuggestionRule,
 } from "@receipt-report/contracts";
@@ -13,8 +14,9 @@ import {
 
 function scopeLabel(rule: CategorySuggestionRule): string {
   if (rule.scopeKind === "global") return "Global";
-  if (rule.scopeKind === "brand") return `Brand · ${rule.brandId}`;
-  return `Store · ${rule.storeId}`;
+  if (rule.scopeKind === "brand")
+    return `Brand · ${rule.brand?.name ?? "Unknown brand"}`;
+  return `Store · ${rule.store?.name ?? "Unknown store"}`;
 }
 
 export function CategorySuggestionRuleManager() {
@@ -199,9 +201,9 @@ export async function rememberCategoryRule(input: {
     throw new Error("remember");
   }
   const parameters = new URLSearchParams({
-    query: input.description,
+    exactDescription: input.description,
     scopeKind: input.scopeKind,
-    limit: "100",
+    limit: "1",
   });
   if (input.brandId) parameters.set("brandId", input.brandId);
   if (input.storeId) parameters.set("storeId", input.storeId);
@@ -214,11 +216,7 @@ export async function rememberCategoryRule(input: {
     .rules.find(
       (rule) =>
         rule.normalizedDescription ===
-        input.description
-          .normalize("NFC")
-          .trim()
-          .replace(/\s+/gu, " ")
-          .toLocaleLowerCase("de-DE"),
+        normalizeRuleDescription(input.description),
     );
   if (!existing) throw new Error("existing");
   if (

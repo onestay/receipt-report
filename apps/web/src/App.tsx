@@ -1117,7 +1117,11 @@ export function CategorySuggestionAdvice({
       <div className="suggestion-advice">
         <span>
           Suggested: {categoryLabel(suggestion.category, categories)} ·{" "}
-          {suggestion.scopeKind}
+          {suggestion.scopeKind === "global"
+            ? "global"
+            : suggestion.scopeKind === "brand"
+              ? `brand ${suggestion.brand?.name ?? ""}`
+              : `store ${suggestion.store?.name ?? ""}`}
         </span>
         <button
           type="button"
