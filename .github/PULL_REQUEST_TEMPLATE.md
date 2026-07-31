@@ -15,6 +15,7 @@ Closes #
 - [ ] Type checking
 - [ ] Unit/integration tests and coverage thresholds
 - [ ] Playwright browser tests
+- [ ] UI changes include inspected desktop/mobile screenshots embedded in this PR
 - [ ] Build
 
 <!-- List exact commands and any relevant manual checks. Explain checks that were not run. -->

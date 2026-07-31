@@ -22,8 +22,10 @@ visual verification:
    against the built application.
 2. Verify at representative desktop and mobile viewports whenever the affected
    layout is responsive.
-3. Capture screenshots with synthetic data, inspect the images, and attach the
-   relevant before/after or final-state evidence to the pull request.
+3. Capture screenshots with synthetic data, inspect the images, and embed the
+   relevant before/after or final-state evidence as Markdown images or stable
+   image links in the pull request description so human and automated reviewers
+   can inspect it.
 4. Add behavioral or layout regression assertions where practical. Screenshot
    evidence complements tests; it does not replace them.
 5. Record any viewport or state that could not be verified and explain why in

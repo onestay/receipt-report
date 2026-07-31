@@ -38,8 +38,10 @@ These instructions apply to the entire repository.
   command cannot be run, state why.
 - Verify every user-visible UI change in a real browser at representative
   desktop and mobile viewports. Capture Playwright screenshots of the affected
-  states, inspect them for visual regressions, and attach the relevant evidence
-  to the pull request. DOM assertions alone are not visual verification.
+  states, inspect them for visual regressions, and embed the relevant evidence
+  as Markdown images or stable image links in the pull request description so
+  human and automated reviewers can inspect it. DOM assertions alone are not
+  visual verification.
 - Keep anonymized fixtures minimal and clearly synthetic.
 - Tests must not call paid AI providers, external email services, or the public
   internet unless they are explicitly marked as opt-in external tests.
