@@ -85,7 +85,7 @@ contents, and provider responses must not be written to normal logs or error
 messages. Oversized documents fail locally before a provider request; the MVP
 does not chunk them.
 
-Raw provider output is encrypted only by whatever storage protection the host
+Raw provider output is protected only by whatever storage controls the host
 provides and can make SQLite grow roughly in proportion to receipt count and
 model response size. `EXTRACTION_RAW_RETENTION_MS` controls idempotent removal
 of expired raw output. Attempt timing, outcome, provider/model/profile
@@ -94,6 +94,10 @@ feedback. SQLite, WAL sidecars, and the document tree remain one backup unit;
 stop API and worker writers before backing it up or applying the extraction-job
 migration. Restoring only the database or only the document tree can leave jobs
 without their normalized page inputs.
+
+Each explicit manual retry grants a new bounded automatic-attempt budget.
+Repeated human retry actions can therefore extend a job's total lifetime even
+though every individual automatic run remains capped.
 
 ## Testing
 
