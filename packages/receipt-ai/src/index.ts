@@ -1,10 +1,16 @@
 import { z } from "zod";
+import {
+  euroCentsSchema,
+  quantityMilliSchema,
+  receiptDateSchema,
+  receiptTimeSchema,
+} from "@receipt-report/contracts";
 
 export const EXTRACTION_SCHEMA_VERSION = "receipt-extraction-v1";
 export const GERMAN_RECEIPT_PROFILE_VERSION = "de-receipt-v1";
 
 const signedCentsSchema = z.number().int().safe();
-const nonNegativeCentsSchema = signedCentsSchema.nonnegative();
+const nonNegativeCentsSchema = euroCentsSchema;
 const confidenceSchema = z.number().finite().min(0).max(1);
 
 /** Converts a provider decimal string to cents without binary-float rounding. */
@@ -20,20 +26,6 @@ export function decimalEurosToCents(value: string): number {
   }
   return sign * cents;
 }
-
-const calendarDateSchema = z.string().refine((value) => {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const [year, month, day] = value.split("-").map(Number);
-  const date = new Date(Date.UTC(year ?? 0, (month ?? 0) - 1, day));
-  return (
-    date.getUTCFullYear() === year &&
-    date.getUTCMonth() === (month ?? 0) - 1 &&
-    date.getUTCDate() === day
-  );
-}, "Invalid calendar date");
-const localTimeSchema = z
-  .string()
-  .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Invalid local time");
 
 function extractedField<T extends z.ZodType>(valueSchema: T) {
   return z
@@ -74,7 +66,7 @@ export const extractedLineItemSchema = z
   .object({
     position: z.number().int().safe().nonnegative(),
     description: extractedField(z.string().trim().min(1)),
-    quantityMilli: extractedField(z.number().int().safe().positive()),
+    quantityMilli: extractedField(quantityMilliSchema),
     unit: extractedField(extractedUnitSchema),
     unitPriceCents: extractedField(signedCentsSchema),
     lineTotalCents: extractedField(signedCentsSchema),
@@ -97,8 +89,8 @@ export const receiptExtractionSchema = z
     schemaVersion: z.literal(EXTRACTION_SCHEMA_VERSION),
     profileVersion: z.literal(GERMAN_RECEIPT_PROFILE_VERSION),
     merchantText: extractedField(z.string().trim().min(1)),
-    purchaseDate: extractedField(calendarDateSchema),
-    purchaseTime: extractedField(localTimeSchema),
+    purchaseDate: extractedField(receiptDateSchema),
+    purchaseTime: extractedField(receiptTimeSchema),
     currency: extractedField(z.literal("EUR")),
     grossTotalCents: extractedField(nonNegativeCentsSchema),
     netTotalCents: extractedField(nonNegativeCentsSchema),
@@ -232,25 +224,32 @@ export const germanReceiptProfile = {
   ].join(" "),
 } as const;
 
-function nullableFieldSchema(valueSchema: Record<string, unknown>) {
+function nullableFieldSchema(
+  valueSchema: Record<string, unknown> & { type: string },
+) {
+  const nullableValue = {
+    ...valueSchema,
+    type: [valueSchema.type, "null"],
+    ...(Array.isArray(valueSchema.enum)
+      ? { enum: [...valueSchema.enum, null] }
+      : {}),
+    ...(Object.hasOwn(valueSchema, "const")
+      ? { enum: [valueSchema.const, null] }
+      : {}),
+  };
+  delete (nullableValue as { const?: unknown }).const;
   return {
     type: "object",
     additionalProperties: false,
     required: ["value", "confidence"],
-    anyOf: [
-      {
-        properties: {
-          value: valueSchema,
-          confidence: { type: "number", minimum: 0, maximum: 1 },
-        },
+    properties: {
+      value: nullableValue,
+      confidence: {
+        type: ["number", "null"],
+        minimum: 0,
+        maximum: 1,
       },
-      {
-        properties: {
-          value: { type: "null" },
-          confidence: { type: "null" },
-        },
-      },
-    ],
+    },
   };
 }
 
@@ -321,7 +320,7 @@ const jsonSchema = {
     merchantText: nullableFieldSchema({ type: "string", minLength: 1 }),
     purchaseDate: nullableFieldSchema({ type: "string" }),
     purchaseTime: nullableFieldSchema({ type: "string" }),
-    currency: nullableFieldSchema({ const: "EUR" }),
+    currency: nullableFieldSchema({ type: "string", const: "EUR" }),
     grossTotalCents: nullableFieldSchema({ type: "integer", minimum: 0 }),
     netTotalCents: nullableFieldSchema({ type: "integer", minimum: 0 }),
     taxTotalCents: nullableFieldSchema({ type: "integer", minimum: 0 }),

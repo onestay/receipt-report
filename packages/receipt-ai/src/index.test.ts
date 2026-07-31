@@ -365,6 +365,8 @@ describe("OpenAI-compatible adapter", () => {
     expect(captured?.body).toContain("data:image/png;base64,AQID");
     expect(captured?.body).toContain("data:image/jpeg;base64,BAUG");
     expect(captured?.body).toContain(GERMAN_RECEIPT_PROFILE_VERSION);
+    expect(captured?.body).toContain('"type":["integer","null"]');
+    expect(captured?.body).not.toContain('"anyOf"');
     expect(germanReceiptProfile.systemPrompt).toContain("Erfinde keine");
   });
 
