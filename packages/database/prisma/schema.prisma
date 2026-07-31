@@ -85,8 +85,10 @@ model ReceiptDocument {
   normalizationRequestedAt    DateTime          @default(now())
   normalizationStartedAt      DateTime?
   normalizationCompletedAt    DateTime?
+  normalizationRevision       String?
   pages                       ReceiptPage[]
   normalizationJob            NormalizationJob?
+  extractionJobs              ExtractionJob[]
 
   @@unique([sha256, byteSize])
 }
@@ -125,6 +127,53 @@ model NormalizationJob {
   updatedAt      DateTime        @updatedAt
 
   @@index([status, availableAt, id])
+}
+
+model ExtractionJob {
+  id                          String              @id @default(cuid())
+  documentId                  String
+  document                    ReceiptDocument     @relation(fields: [documentId], references: [id], onDelete: Restrict)
+  normalizationRevision       String
+  normalizationProfileVersion String
+  extractionProfileVersion    String
+  status                      String              @default("pending")
+  attempts                    Int                 @default(0)
+  maxAttempts                 Int
+  availableAt                 DateTime            @default(now())
+  claimedAt                   DateTime?
+  leaseExpiresAt              DateTime?
+  claimToken                  String?
+  lastErrorKind               String?
+  createdAt                   DateTime            @default(now())
+  updatedAt                   DateTime            @updatedAt
+  processingAttempts          ExtractionAttempt[]
+
+  @@unique([documentId, normalizationRevision])
+  @@index([status, availableAt, id])
+  @@index([documentId, createdAt])
+}
+
+model ExtractionAttempt {
+  id                       String        @id @default(cuid())
+  jobId                    String
+  job                      ExtractionJob @relation(fields: [jobId], references: [id], onDelete: Restrict)
+  attemptNumber            Int
+  provider                 String
+  model                    String
+  extractionProfileVersion String
+  status                   String        @default("running")
+  failureKind              String?
+  retryable                Boolean?
+  startedAt                DateTime      @default(now())
+  completedAt              DateTime?
+  durationMs               Int?
+  rawProviderOutput        String?
+  rawPurgedAt              DateTime?
+  validatedOutput          String?
+  createdAt                DateTime      @default(now())
+
+  @@unique([jobId, attemptNumber])
+  @@index([completedAt, rawPurgedAt])
 }
 
 /// Durable retry record for filesystem cleanup that could not complete after a

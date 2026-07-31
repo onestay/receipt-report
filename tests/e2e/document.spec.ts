@@ -125,6 +125,7 @@ test("shows failed normalization and retries it accessibly", async ({
     createdAt: now,
     updatedAt: now,
     normalizationStatus: status,
+    normalizationRevision: null,
     normalizationError: status === "failed" ? "renderer failed" : null,
     normalizationProfileVersion: null,
     normalizationRenderer: null,

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { WorkerConfig } from "@receipt-report/config";
+import type { ReceiptAiConfig, WorkerConfig } from "@receipt-report/config";
 import { NORMALIZATION_PROFILE_VERSION } from "@receipt-report/contracts";
 import {
   type Database,
@@ -28,7 +28,7 @@ export class NormalizationProcessor {
     private readonly database: Database,
     private readonly storage: FilesystemDocumentStorage,
     private readonly renderer: DocumentRenderer,
-    private readonly config: WorkerConfig,
+    private readonly config: WorkerConfig & ReceiptAiConfig,
   ) {}
 
   async resetInterruptedJobs(): Promise<void> {
@@ -237,7 +237,37 @@ export class NormalizationProcessor {
             normalizationProfileVersion: NORMALIZATION_PROFILE_VERSION,
             normalizationRenderer: rendered.renderer,
             normalizationCompletedAt: new Date(),
+            normalizationRevision: revision,
           },
+        });
+        await transaction.extractionJob.updateMany({
+          where: {
+            documentId: job.documentId,
+            status: { in: ["pending", "running", "retry_wait"] },
+            normalizationRevision: { not: revision },
+          },
+          data: {
+            status: "cancelled",
+            claimedAt: null,
+            leaseExpiresAt: null,
+            claimToken: null,
+          },
+        });
+        await transaction.extractionJob.upsert({
+          where: {
+            documentId_normalizationRevision: {
+              documentId: job.documentId,
+              normalizationRevision: revision,
+            },
+          },
+          create: {
+            documentId: job.documentId,
+            normalizationRevision: revision,
+            normalizationProfileVersion: NORMALIZATION_PROFILE_VERSION,
+            extractionProfileVersion: this.config.EXTRACTION_PROFILE_VERSION,
+            maxAttempts: this.config.EXTRACTION_MAX_ATTEMPTS,
+          },
+          update: {},
         });
         const completed = await transaction.normalizationJob.updateMany({
           where: {

@@ -4,7 +4,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { parseWorkerConfig, type WorkerConfig } from "@receipt-report/config";
+import {
+  parseReceiptAiConfig,
+  parseWorkerConfig,
+  type ReceiptAiConfig,
+  type WorkerConfig,
+} from "@receipt-report/config";
 import {
   createDatabase,
   FilesystemDocumentStorage,
@@ -17,7 +22,7 @@ import { RendererFailure, type DocumentRenderer } from "./renderer.js";
 let directory = "";
 let database: Database;
 let storage: FilesystemDocumentStorage;
-let config: WorkerConfig;
+let config: WorkerConfig & ReceiptAiConfig;
 
 function page(value: number, width = 2, height = 3) {
   const bytes = Buffer.from([value]);
@@ -44,7 +49,7 @@ beforeEach(async () => {
   );
   database = await createDatabase(databaseUrl);
   storage = new FilesystemDocumentStorage(join(directory, "documents"));
-  config = parseWorkerConfig({
+  const environment = {
     DATABASE_URL: databaseUrl,
     STORAGE_PATH: storage.root,
     WORKER_READY_FILE: join(directory, "ready"),
@@ -52,7 +57,11 @@ beforeEach(async () => {
     DOCUMENT_MAX_PDF_PAGES: "4",
     NORMALIZATION_MAX_PAGE_PIXELS: "100",
     NORMALIZATION_MAX_TOTAL_PIXELS: "200",
-  });
+  };
+  config = {
+    ...parseWorkerConfig(environment),
+    ...parseReceiptAiConfig(environment),
+  };
 });
 
 afterEach(async () => {
@@ -131,6 +140,18 @@ describe("normalization processor", () => {
     });
     expect(first.pages.map((item) => item.pageNumber)).toEqual([1, 2]);
     expect(first.pages.every((item) => item.totalPages === 2)).toBe(true);
+    expect(first.normalizationRevision).toMatch(/^receipt-page-v1-/);
+    await expect(
+      database.extractionJob.findFirstOrThrow({
+        where: { documentId: document.id },
+      }),
+    ).resolves.toMatchObject({
+      normalizationRevision: first.normalizationRevision,
+      status: "pending",
+      attempts: 0,
+      maxAttempts: config.EXTRACTION_MAX_ATTEMPTS,
+      extractionProfileVersion: config.EXTRACTION_PROFILE_VERSION,
+    });
     for (const item of first.pages)
       expect(await storage.exists(item.relativePath)).toBe(true);
 
@@ -143,6 +164,11 @@ describe("normalization processor", () => {
     expect(await database.documentFileCleanup.count()).toBe(0);
     for (const path of oldPaths) expect(await storage.exists(path)).toBe(false);
     expect(renderer.render).toHaveBeenCalledTimes(2);
+    expect(
+      await database.extractionJob.count({
+        where: { documentId: document.id },
+      }),
+    ).toBe(2);
     await expect(processor.processNext()).resolves.toBe(false);
   });
 

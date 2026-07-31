@@ -1,0 +1,400 @@
+import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  parseReceiptAiConfig,
+  parseWorkerConfig,
+  type ReceiptAiConfig,
+  type WorkerConfig,
+} from "@receipt-report/config";
+import {
+  createDatabase,
+  FilesystemDocumentStorage,
+  normalizedPageRevisionPath,
+  type Database,
+} from "@receipt-report/database";
+import {
+  createDeterministicFakeReceiptExtractor,
+  ReceiptExtractionError,
+  type ReceiptExtractor,
+} from "@receipt-report/receipt-ai";
+import { ExtractionProcessor } from "./extraction.js";
+
+let directory = "";
+let database: Database;
+let storage: FilesystemDocumentStorage;
+let config: WorkerConfig & ReceiptAiConfig;
+let nowMs = Date.parse("2026-07-31T12:00:00.000Z");
+
+beforeEach(async () => {
+  nowMs = Date.parse("2026-07-31T12:00:00.000Z");
+  directory = await mkdtemp(join(tmpdir(), "extraction-worker-"));
+  const databaseUrl = `file:${join(directory, "test.db")}`;
+  execFileSync(
+    "pnpm",
+    ["--filter", "@receipt-report/database", "db:migrate:deploy"],
+    {
+      cwd: process.cwd(),
+      env: { ...process.env, DATABASE_URL: databaseUrl },
+      stdio: "pipe",
+    },
+  );
+  database = await createDatabase(databaseUrl);
+  storage = new FilesystemDocumentStorage(join(directory, "documents"));
+  const environment = {
+    DATABASE_URL: databaseUrl,
+    STORAGE_PATH: storage.root,
+    WORKER_READY_FILE: join(directory, "ready"),
+    NORMALIZATION_VERIFY_RENDERER: "false",
+    EXTRACTION_TIMEOUT_MS: "50",
+    EXTRACTION_LEASE_MS: "100",
+    EXTRACTION_MAX_ATTEMPTS: "3",
+    EXTRACTION_RETRY_BASE_MS: "100",
+    EXTRACTION_RETRY_MAX_MS: "1000",
+    EXTRACTION_RETRY_AFTER_MAX_MS: "200",
+    EXTRACTION_RETRY_JITTER_PERCENT: "0",
+    EXTRACTION_RAW_RETENTION_MS: "1000",
+  };
+  config = {
+    ...parseWorkerConfig(environment),
+    ...parseReceiptAiConfig(environment),
+  };
+});
+
+afterEach(async () => {
+  await database.$disconnect();
+  await rm(directory, { recursive: true, force: true });
+});
+
+async function seed(options: { revision?: string; createJob?: boolean } = {}) {
+  const revision = options.revision ?? "revision-1";
+  const receipt = await database.receipt.create({
+    data: {
+      merchantRaw: "Synthetic extraction",
+      purchaseDate: "2026-07-31",
+      totalCents: 1,
+    },
+  });
+  const document = await database.receiptDocument.create({
+    data: {
+      receiptId: receipt.id,
+      relativePath: `originals/${receipt.id}/original.png`,
+      mediaType: "image/png",
+      byteSize: 1,
+      sha256: createHash("sha256").update(receipt.id).digest("hex"),
+      normalizationStatus: "complete",
+      normalizationProfileVersion: "receipt-page-v1",
+      normalizationRenderer: "synthetic/1",
+      normalizationRevision: revision,
+      normalizationCompletedAt: new Date(nowMs),
+    },
+  });
+  const pages = [];
+  for (let index = 0; index < 2; index += 1) {
+    const bytes = Buffer.from([index + 1]);
+    const relativePath = normalizedPageRevisionPath(
+      document.id,
+      revision,
+      index + 1,
+    );
+    const staged = await storage.stage(bytes, "worker");
+    await storage.promote(staged, relativePath);
+    pages.push(
+      await database.receiptPage.create({
+        data: {
+          documentId: document.id,
+          pageNumber: index + 1,
+          totalPages: 2,
+          relativePath,
+          mediaType: "image/png",
+          byteSize: bytes.length,
+          width: 1,
+          height: 1,
+          sha256: createHash("sha256").update(bytes).digest("hex"),
+          profileVersion: "receipt-page-v1",
+          renderer: "synthetic/1",
+        },
+      }),
+    );
+  }
+  const job =
+    options.createJob === false
+      ? null
+      : await database.extractionJob.create({
+          data: {
+            documentId: document.id,
+            normalizationRevision: revision,
+            normalizationProfileVersion: "receipt-page-v1",
+            extractionProfileVersion: "de-receipt-v1",
+            maxAttempts: config.EXTRACTION_MAX_ATTEMPTS,
+            availableAt: new Date(nowMs),
+          },
+        });
+  return { receipt, document, pages, job };
+}
+
+function processor(extractor: ReceiptExtractor, random = () => 0.5) {
+  return new ExtractionProcessor(
+    database,
+    storage,
+    extractor,
+    config,
+    () => new Date(nowMs),
+    random,
+  );
+}
+
+function requireJob<T>(job: T | null): T {
+  if (!job) throw new Error("Missing fixture extraction job");
+  return job;
+}
+
+describe("extraction processor", () => {
+  it("reads ordered normalized pages and retains immutable attempt output", async () => {
+    const { document, job } = await seed();
+    const storedJob = requireJob(job);
+    const extract = vi.fn(createDeterministicFakeReceiptExtractor().extract);
+    await expect(
+      processor({ name: "fake", extract }).processNext(),
+    ).resolves.toBe(true);
+    expect(extract).toHaveBeenCalledWith({
+      documentId: document.id,
+      pages: [
+        expect.objectContaining({ position: 0, bytes: new Uint8Array([1]) }),
+        expect.objectContaining({ position: 1, bytes: new Uint8Array([2]) }),
+      ],
+    });
+    await expect(
+      database.extractionJob.findUniqueOrThrow({ where: { id: storedJob.id } }),
+    ).resolves.toMatchObject({ status: "succeeded", attempts: 1 });
+    const attempt = await database.extractionAttempt.findFirstOrThrow();
+    expect(attempt).toMatchObject({
+      attemptNumber: 1,
+      provider: "fake",
+      model: "deterministic-fake-v1",
+      status: "succeeded",
+      failureKind: null,
+    });
+    expect(attempt.rawProviderOutput).toContain("deterministic_fake_output");
+    expect(JSON.parse(attempt.validatedOutput ?? "{}")).toMatchObject({
+      schemaVersion: "receipt-extraction-v1",
+    });
+  });
+
+  it("allows only one live claim across concurrent processors", async () => {
+    await seed();
+    let release: (() => void) | undefined;
+    let started: (() => void) | undefined;
+    const startedPromise = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const delegate = createDeterministicFakeReceiptExtractor();
+    const extract = vi.fn(async (request) => {
+      started?.();
+      await blocked;
+      return delegate.extract(request);
+    });
+    const first = processor({ name: "fake", extract });
+    const second = processor({ name: "fake", extract });
+    const active = first.processNext();
+    await startedPromise;
+    await expect(second.processNext()).resolves.toBe(false);
+    release?.();
+    await expect(active).resolves.toBe(true);
+    expect(extract).toHaveBeenCalledOnce();
+    expect(await database.extractionAttempt.count()).toBe(1);
+  });
+
+  it.each([
+    ["rate_limit", true, 999, "retry_wait", 200],
+    ["timeout", true, undefined, "retry_wait", 100],
+    ["provider_unavailable", true, undefined, "retry_wait", 100],
+    ["configuration", false, undefined, "failed", 0],
+    ["authentication", false, undefined, "failed", 0],
+    ["payload_too_large", false, undefined, "failed", 0],
+    ["malformed_response", false, undefined, "failed", 0],
+  ] as const)(
+    "maps %s retryability without hot-looping",
+    async (kind, retryable, retryAfterMs, expectedStatus, delay) => {
+      const { job } = await seed();
+      const storedJob = requireJob(job);
+      const failing: ReceiptExtractor = {
+        name: "synthetic",
+        async extract() {
+          throw new ReceiptExtractionError(
+            kind,
+            retryable,
+            retryAfterMs,
+            kind === "malformed_response"
+              ? "sensitive malformed output"
+              : undefined,
+          );
+        },
+      };
+      await processor(failing).processNext();
+      const stored = await database.extractionJob.findUniqueOrThrow({
+        where: { id: storedJob.id },
+      });
+      expect(stored).toMatchObject({
+        status: expectedStatus,
+        attempts: 1,
+        lastErrorKind: kind,
+      });
+      expect(stored.availableAt.getTime() - nowMs).toBe(delay);
+      await expect(
+        database.extractionAttempt.findFirstOrThrow(),
+      ).resolves.toMatchObject({
+        status: "failed",
+        failureKind: kind,
+        retryable,
+        rawProviderOutput:
+          kind === "malformed_response" ? "sensitive malformed output" : null,
+      });
+    },
+  );
+
+  it("exhausts the retry cap and applies bounded jitter", async () => {
+    config.EXTRACTION_RETRY_JITTER_PERCENT = 20;
+    const { job } = await seed();
+    const storedJob = requireJob(job);
+    const failing: ReceiptExtractor = {
+      name: "synthetic",
+      async extract() {
+        throw new ReceiptExtractionError("timeout", true);
+      },
+    };
+    const extractionProcessor = processor(failing, () => 1);
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      await extractionProcessor.processNext();
+      const stored = await database.extractionJob.findUniqueOrThrow({
+        where: { id: storedJob.id },
+      });
+      expect(stored.attempts).toBe(attempt);
+      expect(stored.status).toBe(attempt < 3 ? "retry_wait" : "failed");
+      if (attempt < 3) {
+        const expectedDelay = 100 * 2 ** (attempt - 1) * 1.2;
+        expect(stored.availableAt.getTime() - nowMs).toBe(expectedDelay);
+        nowMs = stored.availableAt.getTime();
+      }
+    }
+    expect(await database.extractionAttempt.count()).toBe(3);
+  });
+
+  it("recovers an expired lease and continues attempt numbering", async () => {
+    const { job } = await seed();
+    const storedJob = requireJob(job);
+    await database.extractionJob.update({
+      where: { id: storedJob.id },
+      data: {
+        status: "running",
+        attempts: 1,
+        claimedAt: new Date(nowMs - 1000),
+        leaseExpiresAt: new Date(nowMs - 1),
+        claimToken: "expired",
+      },
+    });
+    await database.extractionAttempt.create({
+      data: {
+        jobId: storedJob.id,
+        attemptNumber: 1,
+        provider: "fake",
+        model: "deterministic-fake-v1",
+        extractionProfileVersion: "de-receipt-v1",
+        startedAt: new Date(nowMs - 1000),
+      },
+    });
+    await processor(createDeterministicFakeReceiptExtractor()).processNext();
+    const attempts = await database.extractionAttempt.findMany({
+      orderBy: { attemptNumber: "asc" },
+    });
+    expect(attempts).toMatchObject([
+      {
+        attemptNumber: 1,
+        status: "failed",
+        failureKind: "provider_unavailable",
+      },
+      { attemptNumber: 2, status: "succeeded" },
+    ]);
+  });
+
+  it("purges expired raw payloads idempotently while retaining audit data", async () => {
+    const { job } = await seed();
+    const storedJob = requireJob(job);
+    await database.extractionAttempt.create({
+      data: {
+        jobId: storedJob.id,
+        attemptNumber: 1,
+        provider: "fake",
+        model: "fake-v1",
+        extractionProfileVersion: "de-receipt-v1",
+        status: "succeeded",
+        completedAt: new Date(nowMs - 1001),
+        durationMs: 10,
+        rawProviderOutput: "sensitive raw payload",
+        validatedOutput: '{"safe":true}',
+      },
+    });
+    const extractionProcessor = processor(
+      createDeterministicFakeReceiptExtractor(),
+    );
+    await expect(extractionProcessor.purgeExpiredRawPayloads()).resolves.toBe(
+      1,
+    );
+    await expect(extractionProcessor.purgeExpiredRawPayloads()).resolves.toBe(
+      0,
+    );
+    await expect(
+      database.extractionAttempt.findFirstOrThrow(),
+    ).resolves.toMatchObject({
+      rawProviderOutput: null,
+      validatedOutput: '{"safe":true}',
+      status: "succeeded",
+      rawPurgedAt: new Date(nowMs),
+    });
+  });
+
+  it("fences publication when a newer normalization revision appears", async () => {
+    const { document, job } = await seed();
+    const storedJob = requireJob(job);
+    let release: (() => void) | undefined;
+    let started: (() => void) | undefined;
+    const startedPromise = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const delegate = createDeterministicFakeReceiptExtractor();
+    const extractionProcessor = processor({
+      name: "fake",
+      async extract(request) {
+        started?.();
+        await blocked;
+        return delegate.extract(request);
+      },
+    });
+    const active = extractionProcessor.processNext();
+    await startedPromise;
+    await database.receiptDocument.update({
+      where: { id: document.id },
+      data: { normalizationRevision: "revision-2" },
+    });
+    release?.();
+    await active;
+    await expect(
+      database.extractionJob.findUniqueOrThrow({ where: { id: storedJob.id } }),
+    ).resolves.toMatchObject({ status: "cancelled" });
+    await expect(
+      database.extractionAttempt.findFirstOrThrow(),
+    ).resolves.toMatchObject({
+      status: "cancelled",
+      rawProviderOutput: expect.stringContaining("deterministic_fake_output"),
+    });
+  });
+});

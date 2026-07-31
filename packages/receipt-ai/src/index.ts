@@ -196,12 +196,21 @@ export type ReceiptExtractionErrorKind =
 export class ReceiptExtractionError extends Error {
   readonly kind: ReceiptExtractionErrorKind;
   readonly retryable: boolean;
+  readonly retryAfterMs: number | undefined;
+  readonly rawProviderOutput: string | undefined;
 
-  constructor(kind: ReceiptExtractionErrorKind, retryable: boolean) {
+  constructor(
+    kind: ReceiptExtractionErrorKind,
+    retryable: boolean,
+    retryAfterMs?: number,
+    rawProviderOutput?: string,
+  ) {
     super(`Receipt extraction failed: ${kind}`);
     this.name = "ReceiptExtractionError";
     this.kind = kind;
     this.retryable = retryable;
+    this.retryAfterMs = retryAfterMs;
+    this.rawProviderOutput = rawProviderOutput;
   }
 }
 
@@ -354,11 +363,34 @@ export type ReceiptAiRuntimeConfig = {
   EXTRACTION_MAX_RESPONSE_BYTES: number;
 };
 
-function classifyStatus(status: number): ReceiptExtractionError {
+export function parseRetryAfterMs(
+  value: string | null,
+  nowMs = Date.now(),
+): number | undefined {
+  if (!value) return undefined;
+  if (/^\d+$/.test(value)) {
+    const seconds = Number(value);
+    const milliseconds = seconds * 1000;
+    return Number.isSafeInteger(milliseconds) ? milliseconds : undefined;
+  }
+  const at = Date.parse(value);
+  if (!Number.isFinite(at) || at <= nowMs) return undefined;
+  const milliseconds = at - nowMs;
+  return Number.isSafeInteger(milliseconds) ? milliseconds : undefined;
+}
+
+function classifyStatus(response: Response): ReceiptExtractionError {
+  const retryAfterMs = parseRetryAfterMs(response.headers.get("retry-after"));
+  const { status } = response;
   if (status === 401 || status === 403)
     return new ReceiptExtractionError("authentication", false);
-  if (status === 429) return new ReceiptExtractionError("rate_limit", true);
-  return new ReceiptExtractionError("provider_unavailable", status >= 500);
+  if (status === 429)
+    return new ReceiptExtractionError("rate_limit", true, retryAfterMs);
+  return new ReceiptExtractionError(
+    "provider_unavailable",
+    status >= 500,
+    status >= 500 ? retryAfterMs : undefined,
+  );
 }
 
 async function boundedResponseText(
@@ -481,9 +513,10 @@ export function createOpenAiCompatibleReceiptExtractor(
           throw new ReceiptExtractionError("timeout", true);
         throw new ReceiptExtractionError("provider_unavailable", true);
       }
+      let rawProviderOutput: string | undefined;
       try {
-        if (!response.ok) throw classifyStatus(response.status);
-        const rawProviderOutput = await boundedResponseText(
+        if (!response.ok) throw classifyStatus(response);
+        rawProviderOutput = await boundedResponseText(
           response,
           config.maxResponseBytes,
         );
@@ -512,7 +545,12 @@ export function createOpenAiCompatibleReceiptExtractor(
         if (error instanceof ReceiptExtractionError) throw error;
         if (controller.signal.aborted)
           throw new ReceiptExtractionError("timeout", true);
-        throw new ReceiptExtractionError("malformed_response", false);
+        throw new ReceiptExtractionError(
+          "malformed_response",
+          false,
+          undefined,
+          rawProviderOutput,
+        );
       } finally {
         clearTimeout(timeout);
       }
@@ -529,9 +567,9 @@ export function createConfiguredReceiptExtractor(
   options: { fakeResult?: ExtractionResult; fetch?: typeof fetch } = {},
 ): ReceiptExtractor {
   if (config.EXTRACTION_PROVIDER === "fake") {
-    if (!options.fakeResult)
-      throw new ReceiptExtractionError("configuration", false);
-    return createFakeReceiptExtractor(options.fakeResult);
+    return options.fakeResult
+      ? createFakeReceiptExtractor(options.fakeResult)
+      : createDeterministicFakeReceiptExtractor();
   }
   return createOpenAiCompatibleReceiptExtractor({
     baseUrl: config.EXTRACTION_BASE_URL ?? "",
@@ -544,6 +582,37 @@ export function createConfiguredReceiptExtractor(
     profileVersion: config.EXTRACTION_PROFILE_VERSION,
     ...(options.fetch ? { fetch: options.fetch } : {}),
   });
+}
+
+export function createDeterministicFakeReceiptExtractor(): ReceiptExtractor {
+  return {
+    name: "fake",
+    async extract(input) {
+      const request = extractionRequestSchema.parse(input);
+      const absent = { value: null, confidence: null } as const;
+      const structured = receiptExtractionSchema.parse({
+        schemaVersion: EXTRACTION_SCHEMA_VERSION,
+        profileVersion: GERMAN_RECEIPT_PROFILE_VERSION,
+        merchantText: absent,
+        purchaseDate: absent,
+        purchaseTime: absent,
+        currency: absent,
+        grossTotalCents: absent,
+        netTotalCents: absent,
+        taxTotalCents: absent,
+        taxBreakdowns: [],
+        lineItems: [],
+        warnings: ["deterministic_fake_output"],
+      });
+      return {
+        documentId: request.documentId,
+        provider: "fake",
+        model: "deterministic-fake-v1",
+        rawProviderOutput: JSON.stringify(structured),
+        structured,
+      };
+    },
+  };
 }
 
 export function createFakeReceiptExtractor(

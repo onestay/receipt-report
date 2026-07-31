@@ -274,6 +274,35 @@ describe("receipt document API", () => {
         renderer: "sharp/test",
       },
     });
+    await database.receiptDocument.update({
+      where: { id: first.body.id },
+      data: {
+        normalizationStatus: "complete",
+        normalizationRevision: "old-revision",
+      },
+    });
+    const oldExtraction = await database.extractionJob.create({
+      data: {
+        documentId: first.body.id,
+        normalizationRevision: "old-revision",
+        normalizationProfileVersion: "receipt-page-v1",
+        extractionProfileVersion: "de-receipt-v1",
+        status: "running",
+        attempts: 1,
+        maxAttempts: 5,
+        claimToken: "old-claim",
+        claimedAt: new Date(),
+        leaseExpiresAt: new Date(Date.now() + 60_000),
+        processingAttempts: {
+          create: {
+            attemptNumber: 1,
+            provider: "fake",
+            model: "deterministic-fake-v1",
+            extractionProfileVersion: "de-receipt-v1",
+          },
+        },
+      },
+    });
     await request(app())
       .post(`/api/v1/receipts/${receiptId}/document`)
       .attach("document", jpeg, "second.jpg")
@@ -290,6 +319,16 @@ describe("receipt document API", () => {
     expect(await storage.exists(pagePath)).toBe(false);
     expect(await database.receiptPage.count()).toBe(0);
     await expect(
+      database.extractionJob.findUniqueOrThrow({
+        where: { id: oldExtraction.id },
+      }),
+    ).resolves.toMatchObject({ status: "cancelled" });
+    await expect(
+      database.receiptDocument.findUniqueOrThrow({
+        where: { id: first.body.id },
+      }),
+    ).resolves.toMatchObject({ normalizationRevision: null });
+    await expect(
       database.normalizationJob.findUniqueOrThrow({
         where: { documentId: first.body.id },
       }),
@@ -299,6 +338,8 @@ describe("receipt document API", () => {
       .delete(`/api/v1/receipts/${receiptId}/document`)
       .expect(204);
     expect(await database.receiptDocument.count()).toBe(0);
+    expect(await database.extractionAttempt.count()).toBe(0);
+    expect(await database.extractionJob.count()).toBe(0);
     await expect(
       database.receipt.delete({ where: { id: receiptId } }),
     ).resolves.toBeTruthy();

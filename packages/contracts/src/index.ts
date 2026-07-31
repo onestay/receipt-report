@@ -515,6 +515,44 @@ export const normalizationStatusSchema = z.enum([
   "complete",
   "failed",
 ]);
+export const extractionJobStatusSchema = z.enum([
+  "pending",
+  "running",
+  "retry_wait",
+  "succeeded",
+  "failed",
+  "cancelled",
+]);
+export const extractionAttemptStatusSchema = z.enum([
+  "running",
+  "succeeded",
+  "failed",
+  "cancelled",
+]);
+export const extractionStatusResponseSchema = z.object({
+  documentId: idSchema,
+  normalizationRevision: z.string().min(1),
+  status: extractionJobStatusSchema,
+  attempts: z.number().int().nonnegative(),
+  maxAttempts: z.number().int().positive(),
+  availableAt: z.string().datetime(),
+  lastErrorKind: z.string().nullable(),
+  currentAttempt: z
+    .object({
+      attemptNumber: z.number().int().positive(),
+      provider: z.string().min(1),
+      model: z.string().min(1),
+      profileVersion: z.string().min(1),
+      status: extractionAttemptStatusSchema,
+      failureKind: z.string().nullable(),
+      retryable: z.boolean().nullable(),
+      startedAt: z.string().datetime(),
+      completedAt: z.string().datetime().nullable(),
+      durationMs: z.number().int().nonnegative().nullable(),
+      rawPurgedAt: z.string().datetime().nullable(),
+    })
+    .nullable(),
+});
 export const NORMALIZATION_PROFILE_VERSION = "receipt-page-v1";
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 const relativeStoragePathSchema = z
@@ -556,6 +594,7 @@ export const receiptDocumentSchema = z.object({
   normalizationRequestedAt: z.string().datetime(),
   normalizationStartedAt: z.string().datetime().nullable(),
   normalizationCompletedAt: z.string().datetime().nullable(),
+  normalizationRevision: z.string().nullable(),
   pages: z.array(receiptPageSchema),
 });
 

@@ -250,6 +250,7 @@ describe("application shell", () => {
       createdAt: created.createdAt,
       updatedAt: created.updatedAt,
       normalizationStatus: "pending",
+      normalizationRevision: null,
       normalizationError: null,
       normalizationProfileVersion: null,
       normalizationRenderer: null,

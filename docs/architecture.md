@@ -135,6 +135,11 @@ consistent set. Starter categories are inserted only by their schema migration;
 there is no startup seed or repair pass that could recreate a renamed or deleted
 row. Jobs begin as ordinary database records; no separate queue service is
 needed for the initial workload.
+Extraction jobs, immutable attempt history, retained validated output, and
+retention-bounded raw provider output also live in SQLite. They can materially
+increase database size, but do not create a second persistence service or
+backup boundary. Stop API and worker writers and back up SQLite (including WAL
+sidecars) together with the document tree before migrations or restore.
 
 Receipt document storage uses a dedicated absolute, non-root directory distinct
 from the SQLite file. Staging, retained originals, and normalized pages all live

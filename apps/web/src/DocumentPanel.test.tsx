@@ -66,6 +66,7 @@ function makeDocument(
     createdAt: now,
     updatedAt: now,
     normalizationStatus: status,
+    normalizationRevision: status === "complete" ? "test-revision" : null,
     normalizationError: status === "failed" ? "renderer failed" : null,
     normalizationProfileVersion:
       status === "complete" ? "receipt-page-v1" : null,

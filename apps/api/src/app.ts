@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import express, { type ErrorRequestHandler, type Express } from "express";
-import type { ApiConfig } from "@receipt-report/config";
+import type { ApiConfig, ReceiptAiConfig } from "@receipt-report/config";
 import {
   apiErrorSchema,
   categorySuggestionQuerySchema,
@@ -44,6 +44,7 @@ import {
 import { CategoryRepository } from "./categories.js";
 import { CategorySuggestionRuleRepository } from "./category-suggestion-rules.js";
 import { DocumentRepository } from "./documents.js";
+import { ExtractionRepository } from "./extractions.js";
 import { MerchantRepository } from "./merchants.js";
 import { stageMultipartDocument } from "./multipart.js";
 import { ReceiptRepository } from "./receipts.js";
@@ -62,6 +63,10 @@ export type AppOptions = {
     | "DOCUMENT_MAX_DECODED_PIXELS"
     | "DOCUMENT_VALIDATION_TIMEOUT_MS"
   >;
+  extractionConfig?: {
+    maxAttempts: ApiConfig["EXTRACTION_MAX_ATTEMPTS"];
+    profileVersion: ReceiptAiConfig["EXTRACTION_PROFILE_VERSION"];
+  };
 };
 
 export function createApp(options: AppOptions = {}): Express {
@@ -408,6 +413,59 @@ export function createApp(options: AppOptions = {}): Express {
         next(error);
       }
     });
+
+    if (options.extractionConfig) {
+      const extractions = new ExtractionRepository(
+        options.database,
+        options.extractionConfig,
+      );
+      app.get(
+        "/api/v1/receipts/:id/document/extraction",
+        async (request, response, next) => {
+          try {
+            response.json(
+              await extractions.status(
+                receiptIdSchema.parse(request.params.id),
+              ),
+            );
+          } catch (error) {
+            next(error);
+          }
+        },
+      );
+      app.post(
+        "/api/v1/receipts/:id/document/extraction",
+        async (request, response, next) => {
+          try {
+            response
+              .status(202)
+              .json(
+                await extractions.enqueue(
+                  receiptIdSchema.parse(request.params.id),
+                ),
+              );
+          } catch (error) {
+            next(error);
+          }
+        },
+      );
+      app.post(
+        "/api/v1/receipts/:id/document/extraction/retry",
+        async (request, response, next) => {
+          try {
+            response
+              .status(202)
+              .json(
+                await extractions.retry(
+                  receiptIdSchema.parse(request.params.id),
+                ),
+              );
+          } catch (error) {
+            next(error);
+          }
+        },
+      );
+    }
 
     if (options.documentStorage && options.documentConfig) {
       const storage = options.documentStorage;

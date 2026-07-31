@@ -66,6 +66,7 @@ const sharedSchema = z
     NORMALIZATION_TIMEOUT_MS: positiveLimit.default(120_000),
     NORMALIZATION_MEMORY_MB: positiveLimit.default(512),
     NORMALIZATION_POLL_MS: positiveLimit.default(500),
+    EXTRACTION_MAX_ATTEMPTS: positiveLimit.max(20).default(5),
   })
   .superRefine((value, context) => {
     const databasePath = value.DATABASE_URL.slice("file:".length);
@@ -102,13 +103,36 @@ const apiSchema = sharedSchema.extend({
   WEB_DIST_DIR: z.string().min(1).optional(),
 });
 
-const workerSchema = sharedSchema.extend({
-  WORKER_READY_FILE: z.string().min(1),
-  NORMALIZATION_VERIFY_RENDERER: z
-    .enum(["true", "false"])
-    .default("true")
-    .transform((value) => value === "true"),
-});
+const workerSchema = sharedSchema
+  .extend({
+    WORKER_READY_FILE: z.string().min(1),
+    EXTRACTION_POLL_MS: positiveLimit.default(500),
+    EXTRACTION_LEASE_MS: positiveLimit.default(120_000),
+    EXTRACTION_RETRY_BASE_MS: positiveLimit.default(1_000),
+    EXTRACTION_RETRY_MAX_MS: positiveLimit.default(60_000),
+    EXTRACTION_RETRY_AFTER_MAX_MS: positiveLimit.default(300_000),
+    EXTRACTION_RETRY_JITTER_PERCENT: z.coerce
+      .number()
+      .int()
+      .min(0)
+      .max(100)
+      .default(20),
+    EXTRACTION_RAW_RETENTION_MS: positiveLimit.default(7 * 24 * 60 * 60 * 1000),
+    NORMALIZATION_VERIFY_RENDERER: z
+      .enum(["true", "false"])
+      .default("true")
+      .transform((value) => value === "true"),
+  })
+  .superRefine((value, context) => {
+    if (value.EXTRACTION_RETRY_MAX_MS < value.EXTRACTION_RETRY_BASE_MS) {
+      context.addIssue({
+        code: "custom",
+        path: ["EXTRACTION_RETRY_MAX_MS"],
+        message:
+          "EXTRACTION_RETRY_MAX_MS must be at least EXTRACTION_RETRY_BASE_MS",
+      });
+    }
+  });
 
 export type ApiConfig = z.infer<typeof apiSchema>;
 export type WorkerConfig = z.infer<typeof workerSchema>;

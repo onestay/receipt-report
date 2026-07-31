@@ -1,0 +1,395 @@
+import { randomUUID } from "node:crypto";
+import type { ReceiptAiConfig, WorkerConfig } from "@receipt-report/config";
+import type {
+  Database,
+  FilesystemDocumentStorage,
+} from "@receipt-report/database";
+import {
+  ReceiptExtractionError,
+  type ReceiptExtractionErrorKind,
+  type ReceiptExtractor,
+} from "@receipt-report/receipt-ai";
+
+type ExtractionProcessorConfig = WorkerConfig & ReceiptAiConfig;
+
+type ClaimedExtractionJob = {
+  id: string;
+  documentId: string;
+  normalizationRevision: string;
+  normalizationProfileVersion: string;
+  extractionProfileVersion: string;
+  attempts: number;
+  maxAttempts: number;
+  claimToken: string;
+  attemptId: string;
+};
+
+type Failure = {
+  kind: ReceiptExtractionErrorKind;
+  retryable: boolean;
+  retryAfterMs?: number | undefined;
+  rawProviderOutput?: string | undefined;
+};
+
+export class ExtractionProcessor {
+  constructor(
+    private readonly database: Database,
+    private readonly storage: FilesystemDocumentStorage,
+    private readonly extractor: ReceiptExtractor,
+    private readonly config: ExtractionProcessorConfig,
+    private readonly clock: () => Date = () => new Date(),
+    private readonly random: () => number = Math.random,
+  ) {}
+
+  private modelName(): string {
+    return this.config.EXTRACTION_PROVIDER === "openai-compatible"
+      ? (this.config.EXTRACTION_MODEL ?? "unconfigured")
+      : "deterministic-fake-v1";
+  }
+
+  async resetExpiredClaims(): Promise<void> {
+    const now = this.clock();
+    const jobs = await this.database.extractionJob.findMany({
+      where: {
+        status: "running",
+        OR: [{ leaseExpiresAt: null }, { leaseExpiresAt: { lte: now } }],
+      },
+      select: {
+        id: true,
+        attempts: true,
+        maxAttempts: true,
+        claimToken: true,
+        claimedAt: true,
+      },
+    });
+    for (const job of jobs) {
+      await this.database.$transaction(async (transaction) => {
+        const nextStatus =
+          job.attempts < job.maxAttempts ? "retry_wait" : "failed";
+        const reset = await transaction.extractionJob.updateMany({
+          where: {
+            id: job.id,
+            status: "running",
+            claimToken: job.claimToken,
+            OR: [{ leaseExpiresAt: null }, { leaseExpiresAt: { lte: now } }],
+          },
+          data: {
+            status: nextStatus,
+            availableAt: now,
+            claimedAt: null,
+            leaseExpiresAt: null,
+            claimToken: null,
+            lastErrorKind: "provider_unavailable",
+          },
+        });
+        if (reset.count !== 1) return;
+        await transaction.extractionAttempt.updateMany({
+          where: {
+            jobId: job.id,
+            attemptNumber: job.attempts,
+            status: "running",
+          },
+          data: {
+            status: "failed",
+            failureKind: "provider_unavailable",
+            retryable: true,
+            completedAt: now,
+            durationMs: Math.max(
+              0,
+              now.getTime() - (job.claimedAt?.getTime() ?? now.getTime()),
+            ),
+          },
+        });
+      });
+    }
+  }
+
+  async purgeExpiredRawPayloads(): Promise<number> {
+    const cutoff = new Date(
+      this.clock().getTime() - this.config.EXTRACTION_RAW_RETENTION_MS,
+    );
+    const purged = await this.database.extractionAttempt.updateMany({
+      where: {
+        rawProviderOutput: { not: null },
+        rawPurgedAt: null,
+        completedAt: { lte: cutoff },
+      },
+      data: { rawProviderOutput: null, rawPurgedAt: this.clock() },
+    });
+    return purged.count;
+  }
+
+  private async claim(): Promise<ClaimedExtractionJob | null> {
+    const now = this.clock();
+    return this.database.$transaction(async (transaction) => {
+      const candidate = await transaction.extractionJob.findFirst({
+        where: {
+          status: { in: ["pending", "retry_wait"] },
+          availableAt: { lte: now },
+        },
+        orderBy: [{ availableAt: "asc" }, { id: "asc" }],
+      });
+      if (!candidate) return null;
+      const claimToken = randomUUID();
+      const attemptNumber = candidate.attempts + 1;
+      const claimed = await transaction.extractionJob.updateMany({
+        where: {
+          id: candidate.id,
+          status: { in: ["pending", "retry_wait"] },
+          attempts: candidate.attempts,
+        },
+        data: {
+          status: "running",
+          attempts: { increment: 1 },
+          claimedAt: now,
+          leaseExpiresAt: new Date(
+            now.getTime() + this.config.EXTRACTION_LEASE_MS,
+          ),
+          claimToken,
+          lastErrorKind: null,
+        },
+      });
+      if (claimed.count !== 1) return null;
+      const attempt = await transaction.extractionAttempt.create({
+        data: {
+          jobId: candidate.id,
+          attemptNumber,
+          provider: this.extractor.name,
+          model: this.modelName(),
+          extractionProfileVersion: candidate.extractionProfileVersion,
+          startedAt: now,
+        },
+      });
+      return {
+        id: candidate.id,
+        documentId: candidate.documentId,
+        normalizationRevision: candidate.normalizationRevision,
+        normalizationProfileVersion: candidate.normalizationProfileVersion,
+        extractionProfileVersion: candidate.extractionProfileVersion,
+        attempts: attemptNumber,
+        maxAttempts: candidate.maxAttempts,
+        claimToken,
+        attemptId: attempt.id,
+      };
+    });
+  }
+
+  async processNext(): Promise<boolean> {
+    await this.resetExpiredClaims();
+    await this.purgeExpiredRawPayloads();
+    const job = await this.claim();
+    if (!job) return false;
+    const startedAt = this.clock();
+    try {
+      const document = await this.database.receiptDocument.findUnique({
+        where: { id: job.documentId },
+        include: { pages: { orderBy: { pageNumber: "asc" } } },
+      });
+      if (
+        !document ||
+        document.normalizationStatus !== "complete" ||
+        document.normalizationRevision !== job.normalizationRevision ||
+        document.normalizationProfileVersion !==
+          job.normalizationProfileVersion ||
+        document.pages.length < 1 ||
+        document.pages.some(
+          (page, index) =>
+            page.pageNumber !== index + 1 ||
+            page.totalPages !== document.pages.length ||
+            page.profileVersion !== job.normalizationProfileVersion,
+        )
+      ) {
+        await this.cancel(job, startedAt);
+        return true;
+      }
+      const pages = await Promise.all(
+        document.pages.map(async (page, index) => ({
+          position: index,
+          mediaType: page.mediaType as "image/png" | "image/jpeg",
+          bytes: new Uint8Array(await this.storage.read(page.relativePath)),
+        })),
+      );
+      const result = await this.extractor.extract({
+        documentId: job.documentId,
+        pages,
+      });
+      await this.publish(job, result, startedAt);
+    } catch (error) {
+      const failure: Failure =
+        error instanceof ReceiptExtractionError
+          ? {
+              kind: error.kind,
+              retryable: error.retryable,
+              retryAfterMs: error.retryAfterMs,
+              rawProviderOutput: error.rawProviderOutput,
+            }
+          : { kind: "malformed_response", retryable: false };
+      await this.fail(job, failure, startedAt);
+    }
+    return true;
+  }
+
+  private duration(startedAt: Date): number {
+    return Math.max(0, this.clock().getTime() - startedAt.getTime());
+  }
+
+  private async publish(
+    job: ClaimedExtractionJob,
+    result: Awaited<ReturnType<ReceiptExtractor["extract"]>>,
+    startedAt: Date,
+  ): Promise<void> {
+    const now = this.clock();
+    await this.database.$transaction(async (transaction) => {
+      const currentDocument = await transaction.receiptDocument.findFirst({
+        where: {
+          id: job.documentId,
+          normalizationStatus: "complete",
+          normalizationRevision: job.normalizationRevision,
+          normalizationProfileVersion: job.normalizationProfileVersion,
+        },
+        select: { id: true },
+      });
+      const active = await transaction.extractionJob.findFirst({
+        where: {
+          id: job.id,
+          status: "running",
+          claimToken: job.claimToken,
+          normalizationRevision: job.normalizationRevision,
+        },
+        select: { id: true },
+      });
+      if (!currentDocument || !active) {
+        await transaction.extractionAttempt.updateMany({
+          where: { id: job.attemptId, status: "running" },
+          data: {
+            status: "cancelled",
+            completedAt: now,
+            durationMs: this.duration(startedAt),
+            rawProviderOutput: result.rawProviderOutput,
+            validatedOutput: JSON.stringify(result.structured),
+          },
+        });
+        await transaction.extractionJob.updateMany({
+          where: { id: job.id, status: "running", claimToken: job.claimToken },
+          data: {
+            status: "cancelled",
+            claimedAt: null,
+            leaseExpiresAt: null,
+            claimToken: null,
+          },
+        });
+        return;
+      }
+      await transaction.extractionAttempt.update({
+        where: { id: job.attemptId },
+        data: {
+          provider: result.provider,
+          model: result.model,
+          status: "succeeded",
+          completedAt: now,
+          durationMs: this.duration(startedAt),
+          rawProviderOutput: result.rawProviderOutput,
+          validatedOutput: JSON.stringify(result.structured),
+        },
+      });
+      await transaction.extractionJob.update({
+        where: { id: job.id },
+        data: {
+          status: "succeeded",
+          claimedAt: null,
+          leaseExpiresAt: null,
+          claimToken: null,
+          lastErrorKind: null,
+        },
+      });
+    });
+  }
+
+  private retryDelay(job: ClaimedExtractionJob, failure: Failure): number {
+    const exponential = Math.min(
+      this.config.EXTRACTION_RETRY_MAX_MS,
+      this.config.EXTRACTION_RETRY_BASE_MS * 2 ** Math.max(0, job.attempts - 1),
+    );
+    const jitter = this.config.EXTRACTION_RETRY_JITTER_PERCENT / 100;
+    const jittered = Math.max(
+      0,
+      Math.round(exponential * (1 + (this.random() * 2 - 1) * jitter)),
+    );
+    const retryAfter = Math.min(
+      failure.retryAfterMs ?? 0,
+      this.config.EXTRACTION_RETRY_AFTER_MAX_MS,
+    );
+    return Math.max(jittered, retryAfter);
+  }
+
+  private async fail(
+    job: ClaimedExtractionJob,
+    failure: Failure,
+    startedAt: Date,
+  ): Promise<void> {
+    const now = this.clock();
+    const shouldRetry = failure.retryable && job.attempts < job.maxAttempts;
+    const availableAt = new Date(
+      now.getTime() + (shouldRetry ? this.retryDelay(job, failure) : 0),
+    );
+    await this.database.$transaction(async (transaction) => {
+      const active = await transaction.extractionJob.findFirst({
+        where: { id: job.id, status: "running", claimToken: job.claimToken },
+        include: { document: { select: { normalizationRevision: true } } },
+      });
+      if (!active) return;
+      const stale =
+        active.document.normalizationRevision !== job.normalizationRevision;
+      await transaction.extractionAttempt.updateMany({
+        where: { id: job.attemptId, status: "running" },
+        data: {
+          status: stale ? "cancelled" : "failed",
+          failureKind: stale ? null : failure.kind,
+          retryable: stale ? null : failure.retryable,
+          ...(failure.rawProviderOutput === undefined
+            ? {}
+            : { rawProviderOutput: failure.rawProviderOutput }),
+          completedAt: now,
+          durationMs: this.duration(startedAt),
+        },
+      });
+      await transaction.extractionJob.updateMany({
+        where: { id: job.id, status: "running", claimToken: job.claimToken },
+        data: {
+          status: stale ? "cancelled" : shouldRetry ? "retry_wait" : "failed",
+          availableAt,
+          claimedAt: null,
+          leaseExpiresAt: null,
+          claimToken: null,
+          lastErrorKind: stale ? null : failure.kind,
+        },
+      });
+    });
+  }
+
+  private async cancel(
+    job: ClaimedExtractionJob,
+    startedAt: Date,
+  ): Promise<void> {
+    const now = this.clock();
+    await this.database.$transaction([
+      this.database.extractionAttempt.updateMany({
+        where: { id: job.attemptId, status: "running" },
+        data: {
+          status: "cancelled",
+          completedAt: now,
+          durationMs: this.duration(startedAt),
+        },
+      }),
+      this.database.extractionJob.updateMany({
+        where: { id: job.id, status: "running", claimToken: job.claimToken },
+        data: {
+          status: "cancelled",
+          claimedAt: null,
+          leaseExpiresAt: null,
+          claimToken: null,
+        },
+      }),
+    ]);
+  }
+}

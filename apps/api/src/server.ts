@@ -1,5 +1,5 @@
 import { mkdir } from "node:fs/promises";
-import { parseApiConfig } from "@receipt-report/config";
+import { parseApiConfig, parseReceiptAiConfig } from "@receipt-report/config";
 import {
   createDatabase,
   enableWal,
@@ -13,6 +13,7 @@ export async function startServer(
   environment: NodeJS.ProcessEnv = process.env,
 ) {
   const config = parseApiConfig(environment);
+  const receiptAiConfig = parseReceiptAiConfig(environment);
   await mkdir(config.STORAGE_PATH, { recursive: true });
   const database = await createDatabase(config.DATABASE_URL);
   const journalMode = await enableWal(database);
@@ -25,6 +26,10 @@ export async function startServer(
     database,
     documentStorage,
     documentConfig: config,
+    extractionConfig: {
+      maxAttempts: config.EXTRACTION_MAX_ATTEMPTS,
+      profileVersion: receiptAiConfig.EXTRACTION_PROFILE_VERSION,
+    },
     ...(config.WEB_DIST_DIR ? { webDistDirectory: config.WEB_DIST_DIR } : {}),
   });
   const server = app.listen(config.PORT, config.HOST);

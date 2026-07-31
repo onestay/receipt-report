@@ -38,6 +38,32 @@ describe("configuration", () => {
     ).toBe("./ready");
   });
 
+  it("applies bounded extraction worker defaults", () => {
+    expect(
+      parseWorkerConfig({ ...shared, WORKER_READY_FILE: "./ready" }),
+    ).toMatchObject({
+      EXTRACTION_MAX_ATTEMPTS: 5,
+      EXTRACTION_POLL_MS: 500,
+      EXTRACTION_LEASE_MS: 120_000,
+      EXTRACTION_RETRY_BASE_MS: 1_000,
+      EXTRACTION_RETRY_MAX_MS: 60_000,
+      EXTRACTION_RETRY_AFTER_MAX_MS: 300_000,
+      EXTRACTION_RETRY_JITTER_PERCENT: 20,
+      EXTRACTION_RAW_RETENTION_MS: 7 * 24 * 60 * 60 * 1000,
+    });
+  });
+
+  it("rejects an extraction retry cap below its base delay", () => {
+    expect(() =>
+      parseWorkerConfig({
+        ...shared,
+        WORKER_READY_FILE: "./ready",
+        EXTRACTION_RETRY_BASE_MS: "2000",
+        EXTRACTION_RETRY_MAX_MS: "1000",
+      }),
+    ).toThrow();
+  });
+
   it.each(["", "relative", "/"])(
     "rejects unsafe storage root %j",
     (STORAGE_PATH) => {
