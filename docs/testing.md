@@ -49,6 +49,13 @@ replacement/removal. Playwright exercises real image/PDF normalization with the
 API and worker; component tests deterministically cover failure states that
 would otherwise require corrupting the queue.
 
+The AI-review slice exercises the deterministic local extractor from upload
+through proposal approval, warning acknowledgement, failed-job retry, and
+approved reprocessing. Its evidence mode (`CAPTURE_UI_EVIDENCE=1`) writes
+synthetic desktop and mobile screenshots under
+`docs/screenshots/issue-38/`; ordinary CI verifies behavior without rewriting
+the committed evidence.
+
 Playwright should collect traces, screenshots, and videos on failure as CI
 artifacts. Tests should prefer accessible roles and labels over implementation
 selectors.

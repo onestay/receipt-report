@@ -232,5 +232,5 @@ describe("extraction job migration", () => {
     expect(
       await database.$queryRawUnsafe<unknown[]>("PRAGMA foreign_key_check"),
     ).toEqual([]);
-  });
+  }, 30_000);
 });

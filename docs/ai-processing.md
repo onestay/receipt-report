@@ -108,6 +108,20 @@ Each explicit manual retry grants a new bounded automatic-attempt budget.
 Repeated human retry actions can therefore extend a job's total lifetime even
 though every individual automatic run remains capped.
 
+## Browser review
+
+Receipt list and detail screens expose preparing, queued, processing, needs
+review, failed, and approved states. The browser polls only transient states,
+pauses while hidden, and never replaces local proposal edits with a polling
+response. Proposed fields and ordered lines stay visually separate from saved
+canonical data. Findings move keyboard focus to affected fields, confidence is
+advisory, and exact-rule category suggestions require explicit adoption.
+
+Approval requires warning acknowledgement and the receipt concurrency token.
+Rejecting edited proposals and reprocessing approved receipts require explicit
+confirmation. Recoverable and stale failures preserve local edits, while
+approved human data remains authoritative during later processing.
+
 ## Testing
 
 Provider calls are replaced by deterministic fakes in ordinary tests. Contract
