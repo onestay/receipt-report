@@ -258,7 +258,17 @@ describe("AI review panel", () => {
             string,
             unknown
           >;
-          return approvalAttempts === 1
+          if (approvalAttempts === 1)
+            return response(
+              {
+                error: {
+                  code: "conflict",
+                  message: "Proposal contains blocking findings",
+                },
+              },
+              409,
+            );
+          return approvalAttempts === 2
             ? response({ error: { code: "conflict", message: "stale" } }, 409)
             : response({ status: "approved" });
         }
@@ -297,12 +307,37 @@ describe("AI review panel", () => {
     expect(document.getElementById("proposal-line-0-categoryId")).toHaveValue(
       categoryId,
     );
+    fireEvent.change(screen.getByLabelText("Quantity (thousandths)"), {
+      target: { value: "1500" },
+    });
+    fireEvent.change(screen.getByLabelText("Unit price"), {
+      target: { value: "1,25" },
+    });
+    fireEvent.change(screen.getByLabelText("Line total"), {
+      target: { value: "1,88" },
+    });
+    fireEvent.change(screen.getByLabelText("Kind"), {
+      target: { value: "item" },
+    });
     const approve = screen.getByRole("button", {
       name: "Approve reviewed values",
     });
     expect(approve).toBeDisabled();
-    fireEvent.click(screen.getByLabelText(/I reviewed line sum mismatch/));
+    const warning = screen.getByLabelText(/I reviewed line sum mismatch/);
+    fireEvent.click(warning);
     expect(approve).toBeEnabled();
+    fireEvent.click(warning);
+    expect(approve).toBeDisabled();
+    fireEvent.click(warning);
+    fireEvent.click(approve);
+    expect(
+      await screen.findByText(
+        "Resolve the blocking findings before approval. Your review edits are still here.",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.queryByText(/receipt, document, or proposal changed/i),
+    ).not.toBeInTheDocument();
     fireEvent.click(approve);
     expect(
       await screen.findByText(
@@ -321,7 +356,15 @@ describe("AI review panel", () => {
       acknowledgedWarningCodes: ["line_sum_mismatch"],
       snapshot: {
         merchantRaw: "Human Markt",
-        lineItems: [{ categoryId, kind: "unknown" }],
+        lineItems: [
+          {
+            categoryId,
+            kind: "item",
+            quantityMilli: 1500,
+            unitPriceCents: 125,
+            lineTotalCents: 188,
+          },
+        ],
       },
     });
   });
@@ -372,6 +415,7 @@ describe("AI review panel", () => {
 
   it("shows an actionable failure and queues retry", async () => {
     let failed = true;
+    let retryStatusChecks = 0;
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
@@ -383,12 +427,19 @@ describe("AI review panel", () => {
           failed = false;
           return response({ status: "pending" }, 202);
         }
-        if (url.endsWith("/document/extraction"))
+        if (url.endsWith("/document/extraction")) {
+          if (!failed) retryStatusChecks += 1;
           return response({
             ...statusResponse,
-            status: failed ? "failed" : "pending",
+            status: failed
+              ? "failed"
+              : retryStatusChecks === 1
+                ? "pending"
+                : "succeeded",
             lastErrorKind: failed ? "timeout" : null,
           });
+        }
+        if (url.endsWith("/extraction-proposal")) return response(proposal);
         throw new Error(`Unexpected request: ${url}`);
       },
     );
@@ -405,6 +456,9 @@ describe("AI review panel", () => {
     expect(await screen.findByText("Extraction needs attention")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Retry extraction" }));
     expect(await screen.findByText("Retry queued.")).toBeVisible();
+    expect(
+      await screen.findByText("Needs review", {}, { timeout: 3_000 }),
+    ).toBeVisible();
   });
 
   it("keeps approved data authoritative and confirms reprocessing", async () => {

@@ -35,14 +35,14 @@ type Lifecycle = {
   proposal: ExtractionProposal | null;
   failureKind: string | null;
   refresh: () => Promise<void>;
+  resumePolling: () => void;
 };
 
 function useLifecycle(receiptId: string): Lifecycle {
   const [phase, setPhase] = useState<Phase>("idle");
   const [proposal, setProposal] = useState<ExtractionProposal | null>(null);
   const [failureKind, setFailureKind] = useState<string | null>(null);
-  const phaseRef = useRef(phase);
-  phaseRef.current = phase;
+  const [pollGeneration, setPollGeneration] = useState(0);
 
   const refresh = useCallback(async () => {
     const documentResponse = await fetch(
@@ -132,7 +132,7 @@ function useLifecycle(receiptId: string): Lifecycle {
       if (
         active &&
         attempt < 40 &&
-        ["preparing", "queued", "processing", "idle"].includes(phaseRef.current)
+        ["preparing", "queued", "processing", "idle"].includes(phase)
       )
         timer = window.setTimeout(() => void poll(), 750);
     };
@@ -150,8 +150,12 @@ function useLifecycle(receiptId: string): Lifecycle {
       window.clearTimeout(timer);
       document.removeEventListener("visibilitychange", visible);
     };
-  }, [refresh]);
-  return { phase, proposal, failureKind, refresh };
+  }, [refresh, pollGeneration, phase]);
+  const resumePolling = useCallback(
+    () => setPollGeneration((generation) => generation + 1),
+    [],
+  );
+  return { phase, proposal, failureKind, refresh, resumePolling };
 }
 
 export function ReceiptLifecycleBadge({ receiptId }: { receiptId: string }) {
@@ -314,8 +318,15 @@ export function AIReviewPanel({
         const parsed = apiErrorSchema.safeParse(
           await response.json().catch(() => null),
         );
-        if (response.status === 409) setStale(true);
-        throw new Error(parsed.success ? parsed.data.error.code : "request");
+        const errorMessage = parsed.success
+          ? parsed.data.error.message
+          : "Request failed";
+        if (
+          response.status === 409 &&
+          /stale|superseded|changed/i.test(errorMessage)
+        )
+          setStale(true);
+        throw new Error(errorMessage);
       }
       return response;
     } finally {
@@ -405,9 +416,12 @@ export function AIReviewPanel({
       announce("Proposal approved. The reviewed values are now canonical.");
       await onApproved();
       await lifecycle.refresh();
-    } catch {
+    } catch (error) {
       announce(
-        "Approval did not complete. Your review edits are still here; refresh stale data or try again.",
+        error instanceof Error &&
+          error.message === "Proposal contains blocking findings"
+          ? "Resolve the blocking findings before approval. Your review edits are still here."
+          : "Approval did not complete. Your review edits are still here; refresh stale data or try again.",
         true,
       );
     }
@@ -455,7 +469,7 @@ export function AIReviewPanel({
           ? "Reprocessing queued. Approved values are unchanged."
           : "Retry queued.",
       );
-      await lifecycle.refresh();
+      lifecycle.resumePolling();
     } catch {
       announce("The extraction could not be queued. Try again.", true);
     }
