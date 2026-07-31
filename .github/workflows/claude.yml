@@ -50,4 +50,8 @@ jobs:
           # Optional: Add claude_args to customize behavior and configuration
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
-          claude_args: "--model sonnet"
+          # Keep Claude advisory while allowing it to verify repository state and
+          # consult the trusted documentation used by this project.
+          claude_args: |
+            --model sonnet
+            --allowedTools "Bash(gh issue view:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr checks:*),Bash(gh run view:*),WebFetch(domain:github.com),WebFetch(domain:docs.github.com),WebFetch(domain:code.claude.com),WebFetch(domain:docs.anthropic.com),WebFetch(domain:platform.openai.com)"
