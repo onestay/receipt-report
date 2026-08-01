@@ -313,7 +313,7 @@ describe("AI review panel", () => {
     expect(document.getElementById("proposal-line-0-categoryId")).toHaveValue(
       categoryId,
     );
-    expect(screen.getByText("Source: manual edit")).toBeVisible();
+    expect(screen.getByText("Source: exact local rule")).toBeVisible();
     const prompt = vi.spyOn(window, "prompt").mockReturnValue("global");
     vi.spyOn(window, "confirm").mockReturnValue(true);
     fireEvent.click(
@@ -380,6 +380,7 @@ describe("AI review panel", () => {
         lineItems: [
           {
             categoryId,
+            categoryProvenance: "exact_rule",
             kind: "item",
             quantityMilli: 1500,
             unitPriceCents: 125,

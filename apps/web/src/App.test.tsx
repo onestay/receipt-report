@@ -106,6 +106,18 @@ describe("application shell", () => {
       screen.getByRole("heading", { name: "Line · Category Id" }),
     ).toBeVisible();
     expect(screen.getByText("25% correction rate")).toBeVisible();
+    fireEvent.change(screen.getByLabelText("Model"), {
+      target: { value: "fake-v1" },
+    });
+    fireEvent.change(screen.getByLabelText("From"), {
+      target: { value: "2026-08-01" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenLastCalledWith(
+        "/api/v1/extraction-quality?model=fake-v1&from=2026-08-01",
+      ),
+    );
     unmount();
     cleanup();
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 503 }));

@@ -307,5 +307,22 @@ describe("proposal validation", () => {
         correctionKind: "value_removed",
       }),
     );
+    const missingMoney = snapshot();
+    missingMoney.totalCents = 0;
+    missingMoney.totalConfidence = null;
+    firstLine(missingMoney).lineTotalCents = 0;
+    firstLine(missingMoney).lineTotalConfidence = null;
+    expect(correctionComparisons(missingMoney, snapshot())).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "totalCents",
+          correctionKind: "missing_filled",
+        }),
+        expect.objectContaining({
+          path: "lineItems.0.lineTotalCents",
+          correctionKind: "missing_filled",
+        }),
+      ]),
+    );
   });
 });

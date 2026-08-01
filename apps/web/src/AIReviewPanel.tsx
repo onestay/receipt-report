@@ -271,6 +271,9 @@ export function AIReviewPanel({
   const [categoryTouched, setCategoryTouched] = useState<Set<number>>(
     new Set(),
   );
+  const [categorySources, setCategorySources] = useState<
+    Map<number, "manual" | "exact_rule">
+  >(new Map());
   const messageRef = useRef<HTMLDivElement>(null);
   const dirty =
     !!draft && !!source && JSON.stringify(draft) !== JSON.stringify(source);
@@ -289,6 +292,7 @@ export function AIReviewPanel({
     setAcknowledged(new Set());
     setStale(false);
     setCategoryTouched(new Set());
+    setCategorySources(new Map());
   }, [lifecycle.proposal, proposalId, dirty]);
 
   const warningCodes = useMemo(
@@ -353,16 +357,20 @@ export function AIReviewPanel({
       quantityMilli: line.quantityMilli ? Number(line.quantityMilli) : null,
       unitPriceCents: line.unitPrice ? parseSignedMoney(line.unitPrice) : null,
       lineTotalCents: parseSignedMoney(line.lineTotal),
+      lineTotalConfidence:
+        lifecycle.proposal?.snapshot.lineItems[index]?.lineTotalConfidence ??
+        null,
       categoryId: line.categoryId,
       categorySuggestion:
         lifecycle.proposal?.snapshot.lineItems[index]?.categorySuggestion ??
         null,
       categoryProvenance:
-        line.categoryId !==
+        categorySources.get(index) ??
+        (line.categoryId !==
         lifecycle.proposal?.snapshot.lineItems[index]?.categoryId
           ? "manual"
           : (lifecycle.proposal?.snapshot.lineItems[index]
-              ?.categoryProvenance ?? null),
+              ?.categoryProvenance ?? null)),
       kind: line.kind,
     }));
     if (
@@ -790,6 +798,9 @@ export function AIReviewPanel({
                         }),
                         setCategoryTouched((current) =>
                           new Set(current).add(index),
+                        ),
+                        setCategorySources((current) =>
+                          new Map(current).set(index, "manual"),
                         )
                       )}
                     >
@@ -801,13 +812,15 @@ export function AIReviewPanel({
                   </label>
                   <small className="category-provenance">
                     Source:{" "}
-                    {categoryTouched.has(index)
+                    {categorySources.get(index) === "manual"
                       ? "manual edit"
-                      : proposed?.categoryProvenance === "exact_rule"
+                      : categorySources.get(index) === "exact_rule"
                         ? "exact local rule"
-                        : proposed?.categoryProvenance === "model"
-                          ? "model"
-                          : "unassigned"}
+                        : proposed?.categoryProvenance === "exact_rule"
+                          ? "exact local rule"
+                          : proposed?.categoryProvenance === "model"
+                            ? "model"
+                            : "unassigned"}
                   </small>
                   {categoryTouched.has(index) && line.categoryId && (
                     <button
@@ -847,6 +860,9 @@ export function AIReviewPanel({
                           }),
                           setCategoryTouched((current) =>
                             new Set(current).add(index),
+                          ),
+                          setCategorySources((current) =>
+                            new Map(current).set(index, "exact_rule"),
                           )
                         )}
                       >

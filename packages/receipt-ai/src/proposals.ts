@@ -34,6 +34,7 @@ export function extractionToProposal(
       quantityMilli: line.quantityMilli.value,
       unitPriceCents: line.unitPriceCents.value,
       lineTotalCents: line.lineTotalCents.value ?? 0,
+      lineTotalConfidence: line.lineTotalCents.confidence,
       categoryId: null,
       categorySuggestion: null,
       categoryProvenance: null,
@@ -221,6 +222,7 @@ export function correctionComparisons(
     sourcePosition: number | null,
     proposed: unknown,
     value: unknown,
+    proposedMissing = false,
   ) => {
     const same = JSON.stringify(proposed) === JSON.stringify(value);
     result.push({
@@ -229,7 +231,7 @@ export function correctionComparisons(
       sourcePosition,
       correctionKind: same
         ? "unchanged"
-        : empty(proposed) && !empty(value)
+        : (proposedMissing || empty(proposed)) && !empty(value)
           ? "missing_filled"
           : !empty(proposed) && empty(value)
             ? "value_removed"
@@ -249,7 +251,14 @@ export function correctionComparisons(
     "netCents",
     "taxCents",
   ] as const)
-    add(field, field, null, original[field], accepted[field]);
+    add(
+      field,
+      field,
+      null,
+      original[field],
+      accepted[field],
+      field === "totalCents" && original.totalConfidence === null,
+    );
   const count = Math.max(original.lineItems.length, accepted.lineItems.length);
   for (let position = 0; position < count; position++) {
     const before = original.lineItems[position];
@@ -268,6 +277,8 @@ export function correctionComparisons(
         position,
         before?.[field] ?? null,
         after?.[field] ?? null,
+        field === "lineTotalCents" &&
+          (before?.lineTotalConfidence ?? null) === null,
       );
   }
   return result;

@@ -164,14 +164,29 @@ function ExtractionQuality() {
     typeof correctionQualitySummarySchema.parse
   > | null>(null);
   const [error, setError] = useState(false);
+  const [filterDraft, setFilterDraft] = useState({
+    profileVersion: "",
+    provider: "",
+    model: "",
+    fieldKind: "",
+    from: "",
+    to: "",
+  });
+  const [filters, setFilters] = useState(filterDraft);
   useEffect(() => {
-    void fetch("/api/v1/extraction-quality")
+    const parameters = new URLSearchParams(
+      Object.entries(filters).filter((entry) => entry[1]),
+    );
+    setError(false);
+    void fetch(
+      `/api/v1/extraction-quality${parameters.size ? `?${parameters}` : ""}`,
+    )
       .then(async (response) => {
         if (!response.ok) throw new Error("quality");
         setSummary(correctionQualitySummarySchema.parse(await response.json()));
       })
       .catch(() => setError(true));
-  }, []);
+  }, [filters]);
   return (
     <section aria-labelledby="quality-title">
       <p className="eyebrow">Local extraction feedback</p>
@@ -180,6 +195,49 @@ function ExtractionQuality() {
         Calculated from approved proposal comparisons kept in this database.
         Correction history is never sent to the model provider.
       </p>
+      <form
+        className="quality-filters panel"
+        onSubmit={(event) => {
+          event.preventDefault();
+          setSummary(null);
+          setFilters(filterDraft);
+        }}
+      >
+        <strong>Filter feedback</strong>
+        {(
+          [
+            ["profileVersion", "Profile"],
+            ["provider", "Provider"],
+            ["model", "Model"],
+            ["fieldKind", "Field kind"],
+          ] as const
+        ).map(([name, label]) => (
+          <label key={name}>
+            <span>{label}</span>
+            <input
+              value={filterDraft[name]}
+              onChange={(event) =>
+                setFilterDraft({ ...filterDraft, [name]: event.target.value })
+              }
+            />
+          </label>
+        ))}
+        {(["from", "to"] as const).map((name) => (
+          <label key={name}>
+            <span>{name === "from" ? "From" : "To"}</span>
+            <input
+              type="date"
+              value={filterDraft[name]}
+              onChange={(event) =>
+                setFilterDraft({ ...filterDraft, [name]: event.target.value })
+              }
+            />
+          </label>
+        ))}
+        <button className="button button--small" type="submit">
+          Apply filters
+        </button>
+      </form>
       {error && (
         <div className="panel state" role="alert">
           Quality feedback could not be loaded.

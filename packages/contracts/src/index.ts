@@ -593,6 +593,7 @@ export const proposalLineSchema = z
     quantityMilli: quantityMilliSchema.nullable(),
     unitPriceCents: signedEuroCentsSchema.nullable(),
     lineTotalCents: signedEuroCentsSchema,
+    lineTotalConfidence: z.number().min(0).max(1).nullable().optional(),
     categoryId: idSchema.nullable(),
     categorySuggestion: proposalCategorySuggestionSchema.nullable(),
     categoryProvenance: z
