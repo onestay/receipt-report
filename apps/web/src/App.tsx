@@ -150,7 +150,7 @@ export function App() {
         </nav>
       </header>
       <main className="page">
-        {current.page === "list" && <ReceiptList />}
+        {current.page === "list" && <ReceiptList key={location.search} />}
         {current.page === "new" && <CreateReceipt />}
         {current.page === "detail" && current.id && (
           <ReceiptEditor id={current.id} />
