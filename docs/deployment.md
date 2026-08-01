@@ -84,9 +84,11 @@ set -a; . ./.env.production; set +a
 ```
 
 For every upgrade: read release migration/compatibility notes; create and verify
-the backup; change both image pins to the same new release; run `pull`; then run
-`up --detach --wait`. Confirm health, operator status, a known approved receipt,
-and its spending report. Never run a newer worker against an older API/schema.
+the backup; build both image targets from the same reviewed release (or pull
+both immutable images when they exist in a registry); change both image pins;
+then run `up --detach --wait`. Confirm health, operator status, a known approved
+receipt, and its spending report. Never run a newer worker against an older
+API/schema.
 
 Application rollback is safe only when the release notes say the old binaries
 remain compatible with every applied migration. Otherwise restore the
