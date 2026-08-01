@@ -222,6 +222,22 @@ describe("spending reports", () => {
       .get(adjustment.drillDownUrl)
       .expect(200);
     expect(adjustmentList.body.receipts).toHaveLength(3);
+    const canonicalMerchant = await request(app())
+      .get(
+        `/api/v1/reports/spending?from=2026-01-01&to=2026-02-28&merchantBrandId=${brand.id}&merchantStoreId=${store.id}`,
+      )
+      .expect(200);
+    expect(canonicalMerchant.body.totals).toMatchObject({
+      grossCents: 503,
+      receiptCount: 2,
+    });
+    const unassignedBrand = response.body.merchantBrands.find(
+      (item: { key: string }) => item.key === "unassigned",
+    );
+    const unassignedList = await request(app())
+      .get(unassignedBrand.drillDownUrl)
+      .expect(200);
+    expect(unassignedList.body.receipts).toHaveLength(1);
   });
 
   it("composes subtree, merchant, query, date, and provenance filters", async () => {
@@ -319,6 +335,7 @@ describe("spending reports", () => {
       where: { id: failedSeed.document.id },
       data: { normalizationStatus: "failed" },
     });
+    await receipt("Manual without document", "2026-04-01", 100);
     const workflow = await request(app())
       .get("/api/v1/reports/workflow")
       .expect(200);
@@ -333,8 +350,8 @@ describe("spending reports", () => {
       .get("/api/v1/reports/spending?from=2026-04-01&to=2026-04-01")
       .expect(200);
     expect(spend.body.totals).toMatchObject({
-      receiptCount: 7,
-      grossCents: 700,
+      receiptCount: 8,
+      grossCents: 800,
     });
   });
 
