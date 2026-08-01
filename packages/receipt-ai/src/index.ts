@@ -234,31 +234,36 @@ export const germanReceiptProfile = {
   ].join(" "),
 } as const;
 
+/**
+ * Discrete confidence levels. A `strict` schema is capped at 16 union-typed
+ * parameters, and an enum is not counted as one — a `["number", "null"]` on
+ * every extracted field would exhaust that budget on its own. Every level
+ * still satisfies `confidenceSchema`.
+ */
+const confidenceJsonSchema = { enum: [0, 0.25, 0.5, 0.75, 1, null] } as const;
+
 function nullableFieldSchema(
   valueSchema: Record<string, unknown> & { type: string },
 ) {
-  const nullableValue = {
-    ...valueSchema,
-    type: [valueSchema.type, "null"],
-    ...(Array.isArray(valueSchema.enum)
-      ? { enum: [...valueSchema.enum, null] }
-      : {}),
-    ...(Object.hasOwn(valueSchema, "const")
-      ? { enum: [valueSchema.const, null] }
-      : {}),
-  };
-  delete (nullableValue as { const?: unknown }).const;
+  const { type, enum: values, ...rest } = valueSchema;
+  const enumerated = Array.isArray(values)
+    ? [...values, null]
+    : Object.hasOwn(valueSchema, "const")
+      ? [valueSchema.const, null]
+      : undefined;
+  delete (rest as { const?: unknown }).const;
+  // The provider rejects `enum` declared next to a union `type`, so enumerated
+  // values carry the null case inside the enum and omit `type` entirely.
+  const nullableValue = enumerated
+    ? { ...rest, enum: enumerated }
+    : { ...rest, type: [type, "null"] };
   return {
     type: "object",
     additionalProperties: false,
     required: ["value", "confidence"],
     properties: {
       value: nullableValue,
-      confidence: {
-        type: ["number", "null"],
-        minimum: 0,
-        maximum: 1,
-      },
+      confidence: confidenceJsonSchema,
     },
   };
 }
@@ -328,8 +333,16 @@ const jsonSchema = {
     schemaVersion: { const: EXTRACTION_SCHEMA_VERSION },
     profileVersion: { const: GERMAN_RECEIPT_PROFILE_VERSION },
     merchantText: nullableFieldSchema({ type: "string", minLength: 1 }),
-    purchaseDate: nullableFieldSchema({ type: "string" }),
-    purchaseTime: nullableFieldSchema({ type: "string" }),
+    // Patterns mirror receiptDateSchema/receiptTimeSchema so the provider
+    // constrains the reply instead of it failing validation on arrival.
+    purchaseDate: nullableFieldSchema({
+      type: "string",
+      pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+    }),
+    purchaseTime: nullableFieldSchema({
+      type: "string",
+      pattern: "^([01]\\d|2[0-3]):[0-5]\\d$",
+    }),
     currency: nullableFieldSchema({ type: "string", const: "EUR" }),
     grossTotalCents: nullableFieldSchema({ type: "integer", minimum: 0 }),
     netTotalCents: nullableFieldSchema({ type: "integer", minimum: 0 }),
@@ -339,6 +352,39 @@ const jsonSchema = {
     warnings: { type: "array", items: { type: "string" } },
   },
 } as const;
+
+/**
+ * Keywords the provider rejects in a `strict` schema. The bounds they express
+ * stay enforced by `receiptExtractionSchema` when the reply is parsed.
+ */
+const unsupportedJsonSchemaKeywords = new Set([
+  "minimum",
+  "maximum",
+  "exclusiveMinimum",
+  "exclusiveMaximum",
+  "multipleOf",
+  "minLength",
+  "maxLength",
+  "minItems",
+  "maxItems",
+  "uniqueItems",
+]);
+
+function stripUnsupportedJsonSchemaKeywords(schema: unknown): unknown {
+  if (Array.isArray(schema))
+    return schema.map((entry) => stripUnsupportedJsonSchemaKeywords(entry));
+  if (schema === null || typeof schema !== "object") return schema;
+  return Object.fromEntries(
+    Object.entries(schema)
+      .filter(([keyword]) => !unsupportedJsonSchemaKeywords.has(keyword))
+      .map(([keyword, value]) => [
+        keyword,
+        stripUnsupportedJsonSchemaKeywords(value),
+      ]),
+  );
+}
+
+const providerJsonSchema = stripUnsupportedJsonSchemaKeywords(jsonSchema);
 
 export type OpenAiCompatibleExtractorConfig = {
   baseUrl: string;
@@ -501,7 +547,7 @@ export function createOpenAiCompatibleReceiptExtractor(
                 json_schema: {
                   name: "german_receipt_extraction",
                   strict: true,
-                  schema: jsonSchema,
+                  schema: providerJsonSchema,
                 },
               },
             }),
