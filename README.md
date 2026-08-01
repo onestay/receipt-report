@@ -1,6 +1,6 @@
 # Receipt Report
 
-Receipt Report is a personal, self-hosted application for turning German grocery receipts into a searchable spending history. It is currently an executable foundation: the web app, API, worker, SQLite database, tests, and container boundaries are in place; receipt ingestion and reporting workflows come next.
+Receipt Report is a personal, self-hosted application for turning German grocery receipts into a searchable spending history. The usable AI MVP covers upload, normalization, extraction, human review and correction, approval, correction feedback, and spending reporting.
 
 ## Prerequisites
 
@@ -28,19 +28,20 @@ Stop all development processes with `Ctrl+C`.
 
 ## Common commands
 
-| Command               | Purpose                                            |
-| --------------------- | -------------------------------------------------- |
-| `pnpm dev`            | Start web, API, and worker in watch mode           |
-| `pnpm build`          | Create production builds for every package and app |
-| `pnpm test`           | Run unit and integration tests                     |
-| `pnpm test:coverage`  | Run tests and enforce coverage thresholds          |
-| `pnpm test:e2e`       | Build and run the Playwright smoke test            |
-| `pnpm format`         | Format the repository with Prettier                |
-| `pnpm format:check`   | Check formatting without modifying files           |
-| `pnpm lint`           | Run ESLint                                         |
-| `pnpm typecheck`      | Run strict TypeScript checks                       |
-| `pnpm compose:config` | Validate the resolved Compose configuration        |
-| `pnpm compose:smoke`  | Build and verify an isolated Compose deployment    |
+| Command                      | Purpose                                            |
+| ---------------------------- | -------------------------------------------------- |
+| `pnpm dev`                   | Start web, API, and worker in watch mode           |
+| `pnpm build`                 | Create production builds for every package and app |
+| `pnpm test`                  | Run unit and integration tests                     |
+| `pnpm test:coverage`         | Run tests and enforce coverage thresholds          |
+| `pnpm test:e2e`              | Build and run the Playwright smoke test            |
+| `pnpm format`                | Format the repository with Prettier                |
+| `pnpm format:check`          | Check formatting without modifying files           |
+| `pnpm lint`                  | Run ESLint                                         |
+| `pnpm typecheck`             | Run strict TypeScript checks                       |
+| `pnpm compose:config`        | Validate the resolved Compose configuration        |
+| `pnpm compose:smoke`         | Build and verify an isolated Compose deployment    |
+| `pnpm compose:restore-drill` | Verify whole-volume backup/restore hashes          |
 
 Install Playwright's browser once before running E2E tests locally:
 
@@ -71,6 +72,11 @@ volume). Category starters are a one-time migration data step: later deploys do
 not recreate starter rows that a user renamed or deleted.
 
 ## Docker Compose
+
+The commands below are for local development and synthetic verification. For a
+real data-bearing deployment, pinned releases, backups, upgrades, provider
+privacy, and the localhost-only security boundary, follow
+[`docs/deployment.md`](docs/deployment.md).
 
 ```bash
 docker compose up --build --wait

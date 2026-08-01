@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import {
   parseApiConfig,
   parseReceiptAiConfig,
+  parseReceiptAiProfileConfig,
   parseWorkerConfig,
 } from "./index.js";
 
@@ -155,6 +156,15 @@ describe("configuration", () => {
       EXTRACTION_API_KEY: "secret",
       EXTRACTION_MAX_PAGES: 2,
     });
+  });
+
+  it("lets the API validate the shared profile without receiving provider secrets", () => {
+    expect(parseReceiptAiProfileConfig({})).toEqual({
+      EXTRACTION_PROFILE_VERSION: "de-receipt-v1",
+    });
+    expect(() =>
+      parseReceiptAiProfileConfig({ EXTRACTION_PROFILE_VERSION: "unknown" }),
+    ).toThrow();
   });
 
   it.each([
