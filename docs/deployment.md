@@ -13,6 +13,8 @@ same release and pin `RECEIPT_REPORT_API_IMAGE` and
 `RECEIPT_REPORT_WORKER_IMAGE` to immutable tags or digests. Copy
 `.env.production.example` to `.env.production`, make it readable only by its
 owner (`chmod 600`), and replace every placeholder. Never commit that file.
+The authoritative variable reference, including defaults and service ownership,
+is in the [README configuration section](../README.md#configuration).
 
 This repository does not publish registry images yet. A clean host can build a
 selected signed/reviewed git release locally, then use those exact local tags:
@@ -29,11 +31,14 @@ Validate before startup:
 
 ```bash
 docker compose --env-file .env.production -f compose.production.yaml config --quiet
-docker compose --env-file .env.production -f compose.production.yaml pull
 docker compose --env-file .env.production -f compose.production.yaml up --detach --wait
 curl --fail http://127.0.0.1:3000/api/v1/health
 curl --fail http://127.0.0.1:3000/api/v1/operator/status | jq
 ```
+
+The commands above use the locally built tags. Run `docker compose ... pull`
+before `up` only when the selected immutable images actually exist in a
+registry.
 
 The migration container must finish before API and worker start. A failed
 `migrate` service identifies schema/database/volume ownership errors; an
@@ -73,14 +78,17 @@ point in time.
 
 ```bash
 mkdir -p backups
+set -a; . ./.env.production; set +a
 ./scripts/backup-compose.sh backups
 # copy both .tar.gz and .sha256 off-host and protect them like the receipts
 ```
 
 For every upgrade: read release migration/compatibility notes; create and verify
-the backup; change both image pins to the same new release; run `pull`; then run
-`up --detach --wait`. Confirm health, operator status, a known approved receipt,
-and its spending report. Never run a newer worker against an older API/schema.
+the backup; build both image targets from the same reviewed release (or pull
+both immutable images when they exist in a registry); change both image pins;
+then run `up --detach --wait`. Confirm health, operator status, a known approved
+receipt, and its spending report. Never run a newer worker against an older
+API/schema.
 
 Application rollback is safe only when the release notes say the old binaries
 remain compatible with every applied migration. Otherwise restore the
@@ -88,6 +96,7 @@ pre-upgrade backup; migration files are forward-only and are not manually
 reversed.
 
 ```bash
+set -a; . ./.env.production; set +a
 ./scripts/restore-compose.sh backups/receipt-report-YYYYMMDDTHHMMSSZ.tar.gz
 ```
 

@@ -98,6 +98,114 @@ To remove the local Compose data volume as well as its containers:
 docker compose down --volumes
 ```
 
+## Production deployment
+
+The production profile is intentionally different from the local Compose
+stack: it uses explicitly selected API and worker images, stores the database
+and document tree in one named volume, loads provider credentials only into the
+worker, and publishes the unauthenticated application on localhost only.
+
+```bash
+git checkout <reviewed-release-tag-or-commit>
+docker build --target api-runtime -t receipt-report-api:<release> .
+docker build --target worker-runtime -t receipt-report-worker:<release> .
+cp .env.production.example .env.production
+chmod 600 .env.production
+# Replace every placeholder and keep both image tags on the same release.
+
+docker compose --env-file .env.production -f compose.production.yaml config --quiet
+docker compose --env-file .env.production -f compose.production.yaml up --detach --wait
+curl --fail http://127.0.0.1:3000/api/v1/health
+curl --fail http://127.0.0.1:3000/api/v1/operator/status
+```
+
+Do not expose port 3000 directly to the internet: Receipt Report is currently
+single-user software without authentication. Before upgrades or model/profile
+changes, follow the backup and rollback procedure in
+[`docs/deployment.md`](docs/deployment.md). That guide also covers restore,
+provider privacy, key rotation, retention, growth, and failure diagnosis.
+
+## Configuration
+
+Configuration is read from environment variables and validated at process
+startup. An invalid value prevents the affected service from becoming ready.
+Local development starts from [`.env.example`](.env.example); production
+Compose starts from [`.env.production.example`](.env.production.example).
+Values marked “required” have no application default in the relevant context.
+Byte and time limits are integer bytes and milliseconds unless stated
+otherwise.
+
+### Service and storage
+
+| Variable                  | Used by                 | Default     | Purpose                                                                                                                         |
+| ------------------------- | ----------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `HOST`                    | API                     | `127.0.0.1` | Address the API listens on. Production Compose fixes this to `0.0.0.0` inside the container and publishes it on host localhost. |
+| `PORT`                    | API                     | `3000`      | API listen port inside a non-Compose deployment.                                                                                |
+| `DATABASE_URL`            | API, worker, migrations | required    | SQLite `file:` URL. Production Compose fixes it to `file:/data/receipt-report.db`.                                              |
+| `STORAGE_PATH`            | API, worker             | required    | Absolute, non-root document directory. It must be a dedicated subdirectory rather than the database directory.                  |
+| `WEB_DIST_DIR`            | API                     | unset       | Built web assets served by the API. Production Compose uses `/app/apps/web/dist`.                                               |
+| `WORKER_READY_FILE`       | worker                  | required    | File created only after worker startup checks pass and removed on graceful shutdown.                                            |
+| `OPERATOR_STALE_AFTER_MS` | API                     | `900000`    | Age after which unchanged active normalization/extraction jobs count as stale in operator status.                               |
+
+### Document validation and normalization
+
+| Variable                         | Used by     | Default     | Purpose                                                                                                         |
+| -------------------------------- | ----------- | ----------- | --------------------------------------------------------------------------------------------------------------- |
+| `DOCUMENT_MAX_BYTES`             | API, worker | `26214400`  | Maximum uploaded document size (25 MiB).                                                                        |
+| `DOCUMENT_MAX_REQUEST_BYTES`     | API, worker | `27262976`  | Maximum multipart request size; must exceed `DOCUMENT_MAX_BYTES`.                                               |
+| `DOCUMENT_MAX_PDF_PAGES`         | API, worker | `100`       | Maximum accepted PDF page count.                                                                                |
+| `DOCUMENT_MAX_IMAGE_WIDTH`       | API, worker | `20000`     | Maximum decoded image width in pixels.                                                                          |
+| `DOCUMENT_MAX_IMAGE_HEIGHT`      | API, worker | `20000`     | Maximum decoded image height in pixels.                                                                         |
+| `DOCUMENT_MAX_DECODED_PIXELS`    | API, worker | `200000000` | Maximum decoded pixel count accepted during validation.                                                         |
+| `DOCUMENT_VALIDATION_TIMEOUT_MS` | API, worker | `5000`      | Upload validation deadline.                                                                                     |
+| `NORMALIZATION_MAX_PAGE_PIXELS`  | API, worker | `16777216`  | Maximum pixels in one normalized page.                                                                          |
+| `NORMALIZATION_MAX_TOTAL_PIXELS` | API, worker | `100000000` | Maximum pixels across all normalized pages; must be at least the per-page limit.                                |
+| `NORMALIZATION_TIMEOUT_MS`       | API, worker | `120000`    | Renderer deadline for one document.                                                                             |
+| `NORMALIZATION_MEMORY_MB`        | API, worker | `512`       | Memory ceiling supplied to the normalization renderer.                                                          |
+| `NORMALIZATION_POLL_MS`          | API, worker | `500`       | Worker delay when no normalization work is available.                                                           |
+| `NORMALIZATION_VERIFY_RENDERER`  | worker      | `true`      | Whether startup verifies required renderer tools. Local `.env.example` disables it for lightweight development. |
+
+### Receipt extraction
+
+| Variable                          | Used by     | Default                          | Purpose                                                                                                                                    |
+| --------------------------------- | ----------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `EXTRACTION_PROVIDER`             | worker      | `fake`                           | `fake` for deterministic synthetic development/tests or `openai-compatible` for real extraction. Production explicitly selects the latter. |
+| `EXTRACTION_BASE_URL`             | worker      | required for `openai-compatible` | HTTP(S) base URL whose `chat/completions` endpoint accepts the configured multimodal request.                                              |
+| `EXTRACTION_MODEL`                | worker      | required for `openai-compatible` | Provider model identifier recorded with each attempt.                                                                                      |
+| `EXTRACTION_API_KEY`              | worker      | required for `openai-compatible` | Provider bearer credential. Keep it only in the protected production env file; it is never passed to the API container.                    |
+| `EXTRACTION_PROFILE_VERSION`      | API, worker | `de-receipt-v1`                  | Versioned extraction/profile contract. Only the currently supported value is accepted.                                                     |
+| `EXTRACTION_TIMEOUT_MS`           | worker      | `60000`                          | Provider request deadline.                                                                                                                 |
+| `EXTRACTION_MAX_PAGES`            | worker      | `10`                             | Maximum normalized pages sent in one provider request.                                                                                     |
+| `EXTRACTION_MAX_IMAGE_BYTES`      | worker      | `20971520`                       | Maximum combined normalized-image bytes sent per request.                                                                                  |
+| `EXTRACTION_MAX_RESPONSE_BYTES`   | worker      | `1048576`                        | Maximum provider response body retained/read before rejection.                                                                             |
+| `EXTRACTION_POLL_MS`              | worker      | `500`                            | Worker delay when no extraction work is available.                                                                                         |
+| `EXTRACTION_LEASE_MS`             | worker      | `120000`                         | Claim lease for extraction work; must exceed the provider timeout by at least 60 seconds.                                                  |
+| `EXTRACTION_MAX_ATTEMPTS`         | API, worker | `5`                              | Automatic attempts permitted per extraction job (maximum 20).                                                                              |
+| `EXTRACTION_RETRY_BASE_MS`        | worker      | `1000`                           | Initial retry backoff.                                                                                                                     |
+| `EXTRACTION_RETRY_MAX_MS`         | worker      | `60000`                          | Maximum calculated retry backoff; must be at least the base value.                                                                         |
+| `EXTRACTION_RETRY_AFTER_MAX_MS`   | worker      | `300000`                         | Maximum provider `Retry-After` delay that will be honored.                                                                                 |
+| `EXTRACTION_RETRY_JITTER_PERCENT` | worker      | `20`                             | Random retry jitter from 0–100 percent.                                                                                                    |
+| `EXTRACTION_RAW_RETENTION_MS`     | worker      | `604800000`                      | Retention period for raw provider output (seven days); audit metadata and validated proposals remain durable.                              |
+
+### Production Compose selection
+
+These variables are consumed by `compose.production.yaml`, not parsed by the
+application itself.
+
+| Variable                      | Default               | Purpose                                                                                           |
+| ----------------------------- | --------------------- | ------------------------------------------------------------------------------------------------- |
+| `RECEIPT_REPORT_API_IMAGE`    | required              | Immutable API runtime image tag or digest.                                                        |
+| `RECEIPT_REPORT_WORKER_IMAGE` | required              | Immutable worker runtime image tag or digest from the same release as the API image.              |
+| `RECEIPT_REPORT_DATA_VOLUME`  | `receipt-report-data` | Named volume containing SQLite, WAL state, originals, normalized pages, and audit/reporting data. |
+| `RECEIPT_REPORT_PORT`         | `3000`                | Host-local port published as `127.0.0.1:<port>`.                                                  |
+| `RECEIPT_REPORT_SECRETS_FILE` | `.env.production`     | Worker-only env file containing provider configuration and credentials.                           |
+
+When adding, removing, renaming, changing the default of, or changing the
+meaning of an environment variable, update the appropriate table above,
+`packages/config`, every affected Compose file, and `.env.example` and/or
+`.env.production.example` in the same pull request. Never put a real credential
+or sensitive endpoint in an example file.
+
 ## Production without Compose
 
 ```bash
