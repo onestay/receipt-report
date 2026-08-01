@@ -392,12 +392,14 @@ export class ExtractionProcessor {
           (candidate.category.parent?.archivedAt ?? null) === null &&
           candidate.category._count.children === 0,
       );
-      if (rule)
+      if (rule) {
         line.categorySuggestion = {
           categoryId: rule.categoryId,
           ruleId: rule.id,
           scopeKind: rule.scopeKind as "global" | "brand" | "store",
         };
+        line.categoryProvenance = "exact_rule";
+      }
     }
     return snapshot;
   }

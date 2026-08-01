@@ -1,5 +1,10 @@
 # Architecture
 
+`CorrectionEvent` is immutable approval audit data linked to its decision,
+proposal, attempt, profile, provider, and model. It records stable field paths
+and conservative proposal-line positions, enabling reproducible local extraction
+quality summaries without an external analytics or learning service.
+
 ## Shape
 
 Receipt Report is an API-first TypeScript monorepo deployed as a small set of

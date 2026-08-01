@@ -101,7 +101,7 @@ async function waitForStatus(
 async function evidence(page: Page, name: string) {
   if (!process.env.CAPTURE_UI_EVIDENCE) return;
   await page.screenshot({
-    path: resolve(`docs/screenshots/issue-38/${name}.png`),
+    path: resolve(`docs/screenshots/issue-39/${name}.png`),
     fullPage: true,
   });
 }
@@ -113,6 +113,14 @@ test("reviews automatic extraction, approves edits, and preserves later human ed
   const { receiptId } = await createWithDocument(request, "review");
   await waitForStatus(request, receiptId, "succeeded");
   const database = await createDatabase(`file:${resolve(".runtime/e2e.db")}`);
+  const rememberedCategory = await database.category.create({
+    data: {
+      name: "Remembered groceries",
+      normalizedName: `remembered groceries ${receiptId}`,
+      position: 900,
+    },
+  });
+  const rememberedCategoryId = rememberedCategory.id;
   try {
     const proposal = await database.extractionProposal.findFirstOrThrow({
       where: { receiptId, status: "pending" },
@@ -205,6 +213,17 @@ test("reviews automatic extraction, approves edits, and preserves later human ed
   await review.getByLabel("Gross total").fill("1,00");
   await review.getByLabel("Line total").fill("1,00");
   await review.getByLabel("Kind").selectOption("item");
+  await review.getByLabel("Category").selectOption(rememberedCategoryId);
+  await expect(review.getByText("Source: manual edit")).toBeVisible();
+  page.on("dialog", (dialog) =>
+    dialog.type() === "prompt" ? dialog.accept("global") : dialog.accept(),
+  );
+  await review.getByRole("button", { name: "Remember for future" }).click();
+  await expect(
+    review.getByText(
+      "Category rule remembered locally for future extractions.",
+    ),
+  ).toBeVisible();
   await review.getByLabel(/I reviewed line sum mismatch/).check();
   await review.getByRole("button", { name: "Approve reviewed values" }).click();
   await expect(
@@ -217,8 +236,30 @@ test("reviews automatic extraction, approves edits, and preserves later human ed
   );
   await evidence(page, "desktop-approved");
 
+  const feedbackDatabase = await createDatabase(
+    `file:${resolve(".runtime/e2e.db")}`,
+  );
+  try {
+    await expect(
+      feedbackDatabase.categorySuggestionRule.count({
+        where: {
+          normalizedDescription: "synthetic apple",
+          categoryId: rememberedCategoryId,
+          scopeKind: "global",
+        },
+      }),
+    ).resolves.toBe(1);
+  } finally {
+    await feedbackDatabase.$disconnect();
+  }
+
+  await page.getByRole("link", { name: "AI quality" }).click();
+  await expect(page.getByRole("heading", { name: "AI quality" })).toBeVisible();
+  await expect(page.getByText(/proposed fields/)).toBeVisible();
+  await evidence(page, "desktop-quality-feedback");
+  await page.goto(`/receipts/${receiptId}`);
+
   await page.getByLabel("Merchant").first().fill("Unsaved human correction");
-  page.once("dialog", (dialog) => dialog.accept());
   await review.getByRole("button", { name: "Reprocess receipt" }).click();
   await expect(page.getByLabel("Merchant").first()).toHaveValue(
     "Unsaved human correction",

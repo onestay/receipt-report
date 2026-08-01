@@ -1125,6 +1125,49 @@ progress {
   gap: 0.5rem;
   align-items: center;
 }
+.category-provenance {
+  color: var(--muted);
+  font-weight: 700;
+}
+.quality-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem 1.4rem;
+  margin: 1.5rem 0;
+  padding: 1.1rem 1.3rem;
+}
+.quality-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.8rem;
+  align-items: end;
+  margin: 1.5rem 0;
+  padding: 1.1rem 1.3rem;
+}
+.quality-filters > strong {
+  grid-column: 1 / -1;
+}
+.quality-filters label {
+  display: grid;
+  gap: 0.3rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.quality-buckets {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 1rem;
+}
+.quality-buckets article {
+  display: grid;
+  gap: 0.35rem;
+  padding: 1.15rem;
+}
+.quality-buckets h2,
+.quality-buckets p {
+  margin: 0;
+}
 @media (max-width: 56rem) {
   .category-row {
     grid-template-columns: 1fr;

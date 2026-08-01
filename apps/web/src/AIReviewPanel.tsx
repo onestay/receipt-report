@@ -10,6 +10,7 @@ import {
   type ProposalSnapshot,
 } from "@receipt-report/contracts";
 import { CategoryOptions, categoryLabel } from "./Categories.js";
+import { rememberCategoryRule } from "./CategorySuggestionRules.js";
 
 type Phase =
   | "idle"
@@ -267,6 +268,12 @@ export function AIReviewPanel({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [stale, setStale] = useState(false);
+  const [categoryTouched, setCategoryTouched] = useState<Set<number>>(
+    new Set(),
+  );
+  const [categorySources, setCategorySources] = useState<
+    Map<number, "manual" | "exact_rule">
+  >(new Map());
   const messageRef = useRef<HTMLDivElement>(null);
   const dirty =
     !!draft && !!source && JSON.stringify(draft) !== JSON.stringify(source);
@@ -284,6 +291,8 @@ export function AIReviewPanel({
     setProposalId(proposal.id);
     setAcknowledged(new Set());
     setStale(false);
+    setCategoryTouched(new Set());
+    setCategorySources(new Map());
   }, [lifecycle.proposal, proposalId, dirty]);
 
   const warningCodes = useMemo(
@@ -348,10 +357,20 @@ export function AIReviewPanel({
       quantityMilli: line.quantityMilli ? Number(line.quantityMilli) : null,
       unitPriceCents: line.unitPrice ? parseSignedMoney(line.unitPrice) : null,
       lineTotalCents: parseSignedMoney(line.lineTotal),
+      lineTotalConfidence:
+        lifecycle.proposal?.snapshot.lineItems[index]?.lineTotalConfidence ??
+        null,
       categoryId: line.categoryId,
       categorySuggestion:
         lifecycle.proposal?.snapshot.lineItems[index]?.categorySuggestion ??
         null,
+      categoryProvenance:
+        categorySources.get(index) ??
+        (line.categoryId !==
+        lifecycle.proposal?.snapshot.lineItems[index]?.categoryId
+          ? "manual"
+          : (lifecycle.proposal?.snapshot.lineItems[index]
+              ?.categoryProvenance ?? null)),
       kind: line.kind,
     }));
     if (
@@ -390,6 +409,43 @@ export function AIReviewPanel({
         lineTotalCents: line.lineTotalCents as number,
       })),
     };
+  }
+
+  async function remember(index: number) {
+    const line = draft?.lines[index];
+    if (!line?.categoryId || !line.description.trim()) return;
+    const available = [
+      "global",
+      ...(draft?.merchantBrandId ? ["brand"] : []),
+      ...(draft?.merchantStoreId ? ["store"] : []),
+    ];
+    const scope = window.prompt(
+      `Choose rule scope (${available.join(" / ")}):`,
+      available.at(-1),
+    );
+    if (!scope || !available.includes(scope)) return;
+    if (
+      !window.confirm(
+        `Remember the exact description “${line.description}” for this ${scope} scope?`,
+      )
+    )
+      return;
+    try {
+      const result = await rememberCategoryRule({
+        description: line.description,
+        categoryId: line.categoryId,
+        scopeKind: scope as "global" | "brand" | "store",
+        brandId: scope === "global" ? null : (draft?.merchantBrandId ?? null),
+        storeId: scope === "store" ? (draft?.merchantStoreId ?? null) : null,
+      });
+      announce(
+        result === "cancelled"
+          ? "The existing category rule was left unchanged."
+          : "Category rule remembered locally for future extractions.",
+      );
+    } catch {
+      announce("The category rule could not be remembered.", true);
+    }
   }
 
   async function approve() {
@@ -736,11 +792,17 @@ export function AIReviewPanel({
                     <select
                       id={`proposal-line-${index}-categoryId`}
                       value={line.categoryId ?? ""}
-                      onChange={(event) =>
+                      onChange={(event) => (
                         updateLine(index, {
                           categoryId: event.target.value || null,
-                        })
-                      }
+                        }),
+                        setCategoryTouched((current) =>
+                          new Set(current).add(index),
+                        ),
+                        setCategorySources((current) =>
+                          new Map(current).set(index, "manual"),
+                        )
+                      )}
                     >
                       <CategoryOptions
                         categories={categories}
@@ -748,6 +810,27 @@ export function AIReviewPanel({
                       />
                     </select>
                   </label>
+                  <small className="category-provenance">
+                    Source:{" "}
+                    {categorySources.get(index) === "manual"
+                      ? "manual edit"
+                      : categorySources.get(index) === "exact_rule"
+                        ? "exact local rule"
+                        : proposed?.categoryProvenance === "exact_rule"
+                          ? "exact local rule"
+                          : proposed?.categoryProvenance === "model"
+                            ? "model"
+                            : "unassigned"}
+                  </small>
+                  {categoryTouched.has(index) && line.categoryId && (
+                    <button
+                      type="button"
+                      className="button button--small button--quiet"
+                      onClick={() => void remember(index)}
+                    >
+                      Remember for future
+                    </button>
+                  )}
                   {proposed?.categorySuggestion && !line.categoryId && (
                     <div className="proposal-suggestion">
                       <span>
@@ -770,12 +853,18 @@ export function AIReviewPanel({
                       <button
                         type="button"
                         className="button button--small button--quiet"
-                        onClick={() =>
+                        onClick={() => (
                           updateLine(index, {
                             categoryId:
                               proposed.categorySuggestion?.categoryId ?? null,
-                          })
-                        }
+                          }),
+                          setCategoryTouched((current) =>
+                            new Set(current).add(index),
+                          ),
+                          setCategorySources((current) =>
+                            new Map(current).set(index, "exact_rule"),
+                          )
+                        )}
                       >
                         Adopt suggestion
                       </button>

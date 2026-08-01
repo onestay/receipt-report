@@ -1,5 +1,11 @@
 # AI receipt processing
 
+Correction feedback from approved proposals stays local. Before/after values can
+contain sensitive merchant and product text; they are part of SQLite backups and
+are never sent to the extraction provider. Quality summaries read only this
+local history. Exact category rules also stay local and are applied
+deterministically after model output.
+
 ## Goal
 
 A configurable multimodal model interprets a German receipt document and returns

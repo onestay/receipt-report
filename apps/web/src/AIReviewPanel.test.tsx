@@ -84,6 +84,7 @@ const proposal = {
         lineTotalCents: 90,
         categoryId: null,
         categorySuggestion: { categoryId, ruleId, scopeKind: "store" },
+        categoryProvenance: "exact_rule",
         kind: "unknown",
       },
     ],
@@ -272,6 +273,11 @@ describe("AI review panel", () => {
             ? response({ error: { code: "conflict", message: "stale" } }, 409)
             : response({ status: "approved" });
         }
+        if (
+          url.endsWith("/api/v1/category-suggestion-rules") &&
+          init?.method === "POST"
+        )
+          return response({ id: ruleId }, 201);
         if (url.endsWith("/extraction-proposals"))
           return response({
             proposals: [{ ...proposal, status: "approved" }],
@@ -306,6 +312,21 @@ describe("AI review panel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Adopt suggestion" }));
     expect(document.getElementById("proposal-line-0-categoryId")).toHaveValue(
       categoryId,
+    );
+    expect(screen.getByText("Source: exact local rule")).toBeVisible();
+    const prompt = vi.spyOn(window, "prompt").mockReturnValue("global");
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Remember for future" }),
+    );
+    expect(
+      await screen.findByText(
+        "Category rule remembered locally for future extractions.",
+      ),
+    ).toBeVisible();
+    prompt.mockReturnValueOnce(null);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Remember for future" }),
     );
     fireEvent.change(screen.getByLabelText("Quantity (thousandths)"), {
       target: { value: "1500" },
@@ -359,6 +380,7 @@ describe("AI review panel", () => {
         lineItems: [
           {
             categoryId,
+            categoryProvenance: "exact_rule",
             kind: "item",
             quantityMilli: 1500,
             unitPriceCents: 125,

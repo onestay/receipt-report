@@ -34,8 +34,10 @@ export function extractionToProposal(
       quantityMilli: line.quantityMilli.value,
       unitPriceCents: line.unitPriceCents.value,
       lineTotalCents: line.lineTotalCents.value ?? 0,
+      lineTotalConfidence: line.lineTotalCents.confidence,
       categoryId: null,
       categorySuggestion: null,
+      categoryProvenance: null,
       kind: "unknown" as const,
     })),
   });
@@ -194,4 +196,90 @@ export function proposalDifferences(
     compare(field, original[field], accepted[field]);
   compare("lineItems", original.lineItems, accepted.lineItems);
   return differences;
+}
+
+export type CorrectionComparison = {
+  path: string;
+  fieldKind: string;
+  sourcePosition: number | null;
+  correctionKind: "unchanged" | "changed" | "missing_filled" | "value_removed";
+  proposed: unknown;
+  accepted: unknown;
+};
+
+/** Compare only stable receipt fields and proposal line positions. This never
+ * attempts to identify the same product across receipts. */
+export function correctionComparisons(
+  original: ProposalSnapshot,
+  accepted: ProposalSnapshot,
+): CorrectionComparison[] {
+  const result: CorrectionComparison[] = [];
+  const empty = (value: unknown) =>
+    value === null || value === undefined || value === "";
+  const add = (
+    path: string,
+    fieldKind: string,
+    sourcePosition: number | null,
+    proposed: unknown,
+    value: unknown,
+    proposedMissing = false,
+  ) => {
+    const same = JSON.stringify(proposed) === JSON.stringify(value);
+    result.push({
+      path,
+      fieldKind,
+      sourcePosition,
+      correctionKind: same
+        ? "unchanged"
+        : (proposedMissing || empty(proposed)) && !empty(value)
+          ? "missing_filled"
+          : !empty(proposed) && empty(value)
+            ? "value_removed"
+            : "changed",
+      proposed,
+      accepted: value,
+    });
+  };
+  for (const field of [
+    "merchantRaw",
+    "merchantBrandId",
+    "merchantStoreId",
+    "purchaseDate",
+    "purchaseTime",
+    "currency",
+    "totalCents",
+    "netCents",
+    "taxCents",
+  ] as const)
+    add(
+      field,
+      field,
+      null,
+      original[field],
+      accepted[field],
+      field === "totalCents" && original.totalConfidence === null,
+    );
+  const count = Math.max(original.lineItems.length, accepted.lineItems.length);
+  for (let position = 0; position < count; position++) {
+    const before = original.lineItems[position];
+    const after = accepted.lineItems[position];
+    for (const field of [
+      "description",
+      "quantityMilli",
+      "unitPriceCents",
+      "lineTotalCents",
+      "categoryId",
+      "kind",
+    ] as const)
+      add(
+        `lineItems.${position}.${field}`,
+        `lineItem.${field}`,
+        position,
+        before?.[field] ?? null,
+        after?.[field] ?? null,
+        field === "lineTotalCents" &&
+          (before?.lineTotalConfidence ?? null) === null,
+      );
+  }
+  return result;
 }

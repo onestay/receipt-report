@@ -593,8 +593,13 @@ export const proposalLineSchema = z
     quantityMilli: quantityMilliSchema.nullable(),
     unitPriceCents: signedEuroCentsSchema.nullable(),
     lineTotalCents: signedEuroCentsSchema,
+    lineTotalConfidence: z.number().min(0).max(1).nullable().optional(),
     categoryId: idSchema.nullable(),
     categorySuggestion: proposalCategorySuggestionSchema.nullable(),
+    categoryProvenance: z
+      .enum(["model", "exact_rule", "manual"])
+      .nullable()
+      .optional(),
     kind: lineItemKindSchema,
   })
   .strict();
@@ -667,6 +672,39 @@ export const proposalApproveSchema = z
     acknowledgedWarningCodes: z.array(z.string().min(1)).default([]),
   })
   .strict();
+
+export const correctionQualityQuerySchema = z
+  .object({
+    profileVersion: z.string().min(1).optional(),
+    provider: z.string().min(1).optional(),
+    model: z.string().min(1).optional(),
+    fieldKind: z.string().min(1).optional(),
+    from: z.string().date().optional(),
+    to: z.string().date().optional(),
+  })
+  .strict();
+export const correctionQualityBucketSchema = z.object({
+  profileVersion: z.string().min(1),
+  provider: z.string().min(1),
+  model: z.string().min(1),
+  fieldKind: z.string().min(1),
+  proposedFields: z.number().int().nonnegative(),
+  changedFields: z.number().int().nonnegative(),
+  unchangedFields: z.number().int().nonnegative(),
+  missingFilled: z.number().int().nonnegative(),
+  modelValuesRemoved: z.number().int().nonnegative(),
+  correctionRate: z.number().min(0).max(1),
+});
+export const correctionQualitySummarySchema = z.object({
+  filters: correctionQualityQuerySchema,
+  totals: correctionQualityBucketSchema.omit({
+    profileVersion: true,
+    provider: true,
+    model: true,
+    fieldKind: true,
+  }),
+  buckets: z.array(correctionQualityBucketSchema),
+});
 export const NORMALIZATION_PROFILE_VERSION = "receipt-page-v1";
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 const relativeStoragePathSchema = z
@@ -790,3 +828,9 @@ export type ProposalSnapshot = z.infer<typeof proposalSnapshotSchema>;
 export type ProposalFinding = z.infer<typeof proposalFindingSchema>;
 export type ExtractionProposal = z.infer<typeof extractionProposalSchema>;
 export type ProposalApprove = z.infer<typeof proposalApproveSchema>;
+export type CorrectionQualityQuery = z.infer<
+  typeof correctionQualityQuerySchema
+>;
+export type CorrectionQualitySummary = z.infer<
+  typeof correctionQualitySummarySchema
+>;

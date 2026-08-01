@@ -3,6 +3,7 @@ import {
   apiErrorSchema,
   categorySchema,
   categorySuggestionSchema,
+  correctionQualitySummarySchema,
   merchantBrandListSchema,
   merchantBrandSchema,
   merchantStoreListSchema,
@@ -38,7 +39,7 @@ import {
 import { AIReviewPanel, ReceiptLifecycleBadge } from "./AIReviewPanel.js";
 
 type Route = {
-  page: "list" | "new" | "detail" | "categories" | "category-rules";
+  page: "list" | "new" | "detail" | "categories" | "category-rules" | "quality";
   id?: string;
 };
 const money = new Intl.NumberFormat("de-DE", {
@@ -52,6 +53,7 @@ function route(): Route {
   if (location.pathname === "/categories") return { page: "categories" };
   if (location.pathname === "/category-rules")
     return { page: "category-rules" };
+  if (location.pathname === "/extraction-quality") return { page: "quality" };
   if (location.pathname === "/receipts/new") return { page: "new" };
   const match = location.pathname.match(/^\/receipts\/([^/]+)$/);
   return match?.[1] ? { page: "detail", id: match[1] } : { page: "list" };
@@ -131,6 +133,7 @@ export function App() {
           <Link href="/receipts">Ledger</Link>
           <Link href="/categories">Categories</Link>
           <Link href="/category-rules">Rules</Link>
+          <Link href="/extraction-quality">AI quality</Link>
           <Link href="/receipts/new" className="button button--small">
             New receipt
           </Link>
@@ -144,9 +147,143 @@ export function App() {
         )}
         {current.page === "categories" && <CategoryManager />}
         {current.page === "category-rules" && <CategorySuggestionRuleManager />}
+        {current.page === "quality" && <ExtractionQuality />}
       </main>
       <footer>Quietly kept on your own server.</footer>
     </div>
+  );
+}
+
+function ExtractionQuality() {
+  const fieldLabel = (value: string) =>
+    value
+      .replace("lineItem.", "Line · ")
+      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
+  const [summary, setSummary] = useState<ReturnType<
+    typeof correctionQualitySummarySchema.parse
+  > | null>(null);
+  const [error, setError] = useState(false);
+  const [filterDraft, setFilterDraft] = useState({
+    profileVersion: "",
+    provider: "",
+    model: "",
+    fieldKind: "",
+    from: "",
+    to: "",
+  });
+  const [filters, setFilters] = useState(filterDraft);
+  useEffect(() => {
+    const parameters = new URLSearchParams(
+      Object.entries(filters).filter((entry) => entry[1]),
+    );
+    setError(false);
+    void fetch(
+      `/api/v1/extraction-quality${parameters.size ? `?${parameters}` : ""}`,
+    )
+      .then(async (response) => {
+        if (!response.ok) throw new Error("quality");
+        setSummary(correctionQualitySummarySchema.parse(await response.json()));
+      })
+      .catch(() => setError(true));
+  }, [filters]);
+  return (
+    <section aria-labelledby="quality-title">
+      <p className="eyebrow">Local extraction feedback</p>
+      <h1 id="quality-title">AI quality</h1>
+      <p>
+        Calculated from approved proposal comparisons kept in this database.
+        Correction history is never sent to the model provider.
+      </p>
+      <form
+        className="quality-filters panel"
+        onSubmit={(event) => {
+          event.preventDefault();
+          setSummary(null);
+          setFilters(filterDraft);
+        }}
+      >
+        <strong>Filter feedback</strong>
+        {(
+          [
+            ["profileVersion", "Profile"],
+            ["provider", "Provider"],
+            ["model", "Model"],
+            ["fieldKind", "Field kind"],
+          ] as const
+        ).map(([name, label]) => (
+          <label key={name}>
+            <span>{label}</span>
+            <input
+              value={filterDraft[name]}
+              onChange={(event) =>
+                setFilterDraft({ ...filterDraft, [name]: event.target.value })
+              }
+            />
+          </label>
+        ))}
+        {(["from", "to"] as const).map((name) => (
+          <label key={name}>
+            <span>{name === "from" ? "From" : "To"}</span>
+            <input
+              type="date"
+              value={filterDraft[name]}
+              onChange={(event) =>
+                setFilterDraft({ ...filterDraft, [name]: event.target.value })
+              }
+            />
+          </label>
+        ))}
+        <button className="button button--small" type="submit">
+          Apply filters
+        </button>
+      </form>
+      {error && (
+        <div className="panel state" role="alert">
+          Quality feedback could not be loaded.
+        </div>
+      )}
+      {!summary && !error && (
+        <div className="panel state" role="status">
+          Calculating feedback…
+        </div>
+      )}
+      {summary && (
+        <>
+          <div className="quality-summary panel">
+            <strong>{summary.totals.proposedFields} proposed fields</strong>
+            <span>{summary.totals.changedFields} changed</span>
+            <span>{summary.totals.unchangedFields} unchanged</span>
+            <span>{summary.totals.missingFilled} missing values filled</span>
+            <span>
+              {summary.totals.modelValuesRemoved} model values removed
+            </span>
+            <span>
+              {Math.round(summary.totals.correctionRate * 100)}% correction rate
+            </span>
+          </div>
+          <div className="quality-buckets">
+            {summary.buckets.map((bucket) => (
+              <article
+                className="panel"
+                key={`${bucket.profileVersion}:${bucket.provider}:${bucket.model}:${bucket.fieldKind}`}
+              >
+                <h2>{fieldLabel(bucket.fieldKind)}</h2>
+                <p>
+                  {bucket.provider} · {bucket.model} · {bucket.profileVersion}
+                </p>
+                <strong>
+                  {Math.round(bucket.correctionRate * 100)}% corrected
+                </strong>
+                <small>
+                  {bucket.changedFields} changed of {bucket.proposedFields}
+                </small>
+              </article>
+            ))}
+          </div>
+        </>
+      )}
+    </section>
   );
 }
 
