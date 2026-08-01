@@ -1,0 +1,81 @@
+services:
+  migrate:
+    image: ${RECEIPT_REPORT_API_IMAGE:?Set RECEIPT_REPORT_API_IMAGE to an immutable tag or digest}
+    user: root
+    command:
+      [
+        "sh",
+        "-c",
+        "pnpm --filter @receipt-report/database db:migrate:deploy && chown -R node:node /data",
+      ]
+    environment:
+      DATABASE_URL: file:/data/receipt-report.db
+    volumes:
+      - receipt-data:/data
+    restart: "no"
+
+  api:
+    image: ${RECEIPT_REPORT_API_IMAGE:?Set RECEIPT_REPORT_API_IMAGE to an immutable tag or digest}
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+      DATABASE_URL: file:/data/receipt-report.db
+      STORAGE_PATH: /data/documents
+      WEB_DIST_DIR: /app/apps/web/dist
+      OPERATOR_STALE_AFTER_MS: ${OPERATOR_STALE_AFTER_MS:-900000}
+      EXTRACTION_PROFILE_VERSION: ${EXTRACTION_PROFILE_VERSION:-de-receipt-v1}
+    ports:
+      - "127.0.0.1:${RECEIPT_REPORT_PORT:-3000}:3000"
+    volumes:
+      - receipt-data:/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/v1/health').then(r=>{if(!r.ok)process.exit(1)})",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  worker:
+    image: ${RECEIPT_REPORT_WORKER_IMAGE:?Set RECEIPT_REPORT_WORKER_IMAGE to an immutable tag or digest}
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    env_file:
+      - path: ${RECEIPT_REPORT_SECRETS_FILE:-.env.production}
+        required: true
+    environment:
+      DATABASE_URL: file:/data/receipt-report.db
+      STORAGE_PATH: /data/documents
+      WORKER_READY_FILE: /tmp/receipt-report-worker.ready
+      NORMALIZATION_VERIFY_RENDERER: "true"
+      EXTRACTION_PROVIDER: ${EXTRACTION_PROVIDER:-openai-compatible}
+      EXTRACTION_PROFILE_VERSION: ${EXTRACTION_PROFILE_VERSION:-de-receipt-v1}
+    volumes:
+      - receipt-data:/data
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/receipt-report-worker.ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    stop_grace_period: 130s
+    restart: unless-stopped
+    mem_limit: 768m
+    pids_limit: 128
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+
+volumes:
+  receipt-data:
+    name: ${RECEIPT_REPORT_DATA_VOLUME:-receipt-report-data}

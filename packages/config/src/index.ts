@@ -11,6 +11,11 @@ const safeStoragePath = z.string().superRefine((value, context) => {
 });
 
 const positiveLimit = z.coerce.number().int().positive();
+const extractionProfileSchema = z.object({
+  EXTRACTION_PROFILE_VERSION: z
+    .literal("de-receipt-v1")
+    .default("de-receipt-v1"),
+});
 
 const receiptAiSchema = z
   .object({
@@ -25,9 +30,8 @@ const receiptAiSchema = z
       .optional(),
     EXTRACTION_MODEL: z.string().min(1).optional(),
     EXTRACTION_API_KEY: z.string().min(1).optional(),
-    EXTRACTION_PROFILE_VERSION: z
-      .literal("de-receipt-v1")
-      .default("de-receipt-v1"),
+    EXTRACTION_PROFILE_VERSION:
+      extractionProfileSchema.shape.EXTRACTION_PROFILE_VERSION,
     EXTRACTION_TIMEOUT_MS: positiveLimit.default(60_000),
     EXTRACTION_MAX_PAGES: positiveLimit.default(10),
     EXTRACTION_MAX_IMAGE_BYTES: positiveLimit.default(20 * 1024 * 1024),
@@ -101,6 +105,7 @@ const apiSchema = sharedSchema.extend({
   HOST: z.string().min(1).default("127.0.0.1"),
   PORT: z.coerce.number().int().min(1).max(65_535).default(3000),
   WEB_DIST_DIR: z.string().min(1).optional(),
+  OPERATOR_STALE_AFTER_MS: positiveLimit.default(15 * 60 * 1000),
 });
 
 const workerSchema = sharedSchema
@@ -150,4 +155,10 @@ export function parseReceiptAiConfig(
   input: NodeJS.ProcessEnv,
 ): ReceiptAiConfig {
   return receiptAiSchema.parse(input);
+}
+
+export function parseReceiptAiProfileConfig(
+  input: NodeJS.ProcessEnv,
+): Pick<ReceiptAiConfig, "EXTRACTION_PROFILE_VERSION"> {
+  return extractionProfileSchema.parse(input);
 }

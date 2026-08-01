@@ -54,3 +54,4 @@ jobs:
       - uses: actions/checkout@v4
       - run: docker compose config --quiet
       - run: bash scripts/compose-smoke.sh
+      - run: bash scripts/production-compose-smoke.sh

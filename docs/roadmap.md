@@ -62,6 +62,13 @@ working, verified state.
   pipeline used by manual uploads
 - Deduplicate and enqueue receipts
 
+## Real-data governance boundary
+
+Milestones 1–6 now form the usable AI MVP and the first durable deployment is
+defined by ADR 0016. From this point onward, migrations preserve user data,
+release notes document compatibility and rollback boundaries, and destructive
+schema changes require an explicit tested backup/restore plan.
+
 ## Definition of done for a milestone
 
 - Acceptance criteria for its issues are met

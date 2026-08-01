@@ -23,5 +23,9 @@ docker compose --project-name "$project_name" exec --no-TTY worker sh -c \
   "command -v pdfinfo && command -v pdftoppm && command -v prlimit && pdftoppm -v"
 docker compose --project-name "$project_name" exec --no-TTY api sh -c \
   "cd /app/apps/api && if node --input-type=module -e \"import('sharp')\" 2>/dev/null; then exit 1; fi"
+smoke_receipt_id="$(node scripts/compose-normalization-smoke.mjs \
+  "http://127.0.0.1:${RECEIPT_REPORT_PORT:-3000}")"
+docker compose --project-name "$project_name" restart api worker
+docker compose --project-name "$project_name" up --detach --wait --wait-timeout 180
 node scripts/compose-normalization-smoke.mjs \
-  "http://127.0.0.1:${RECEIPT_REPORT_PORT:-3000}"
+  "http://127.0.0.1:${RECEIPT_REPORT_PORT:-3000}" verify "$smoke_receipt_id"

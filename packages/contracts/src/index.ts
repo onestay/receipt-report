@@ -8,6 +8,27 @@ export const healthResponseSchema = z.object({
 
 export type HealthResponse = z.infer<typeof healthResponseSchema>;
 
+const operatorJobCountsSchema = z.object({
+  healthy: z.number().int().nonnegative(),
+  queued: z.number().int().nonnegative(),
+  running: z.number().int().nonnegative(),
+  retrying: z.number().int().nonnegative(),
+  failed: z.number().int().nonnegative(),
+  stale: z.number().int().nonnegative(),
+});
+
+export const operatorStatusResponseSchema = z.object({
+  status: z.enum(["healthy", "attention_required"]),
+  checkedAt: z.string().datetime(),
+  staleAfterSeconds: z.number().int().positive(),
+  normalization: operatorJobCountsSchema,
+  extraction: operatorJobCountsSchema,
+});
+
+export type OperatorStatusResponse = z.infer<
+  typeof operatorStatusResponseSchema
+>;
+
 const trimmedNonEmptyText = z
   .string()
   .transform((value) => value.trim())

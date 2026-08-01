@@ -15,6 +15,7 @@ import {
   correctionQualityQuerySchema,
   documentUploadConfigurationSchema,
   healthResponseSchema,
+  operatorStatusResponseSchema,
   idSchema,
   merchantBrandCreateSchema,
   merchantBrandUpdateSchema,
@@ -53,6 +54,7 @@ import { stageMultipartDocument } from "./multipart.js";
 import { ReceiptRepository } from "./receipts.js";
 import { ProposalRepository } from "./proposals.js";
 import { ReportRepository } from "./reports.js";
+import { OperatorStatusRepository } from "./operator-status.js";
 
 export type AppOptions = {
   webDistDirectory?: string;
@@ -72,6 +74,7 @@ export type AppOptions = {
     maxAttempts: ApiConfig["EXTRACTION_MAX_ATTEMPTS"];
     profileVersion: ReceiptAiConfig["EXTRACTION_PROFILE_VERSION"];
   };
+  operatorStaleAfterMs?: number;
 };
 
 export function createApp(options: AppOptions = {}): Express {
@@ -90,6 +93,19 @@ export function createApp(options: AppOptions = {}): Express {
   });
 
   if (options.database) {
+    const operatorStatus = new OperatorStatusRepository(
+      options.database,
+      options.operatorStaleAfterMs ?? 15 * 60_000,
+    );
+    app.get("/api/v1/operator/status", async (_request, response, next) => {
+      try {
+        response.json(
+          operatorStatusResponseSchema.parse(await operatorStatus.get()),
+        );
+      } catch (error) {
+        next(error);
+      }
+    });
     const categories = new CategoryRepository(options.database);
     app.get("/api/v1/categories", async (request, response, next) => {
       try {
