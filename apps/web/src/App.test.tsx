@@ -67,6 +67,53 @@ afterEach(() => {
 });
 
 describe("application shell", () => {
+  it("renders local extraction quality and its error state", async () => {
+    history.replaceState({}, "", "/extraction-quality");
+    const summary = {
+      filters: {},
+      totals: {
+        proposedFields: 4,
+        changedFields: 1,
+        unchangedFields: 3,
+        missingFilled: 1,
+        modelValuesRemoved: 0,
+        correctionRate: 0.25,
+      },
+      buckets: [
+        {
+          profileVersion: "de-receipt-v1",
+          provider: "fake",
+          model: "fake-v1",
+          fieldKind: "lineItem.categoryId",
+          proposedFields: 1,
+          changedFields: 1,
+          unchangedFields: 0,
+          missingFilled: 1,
+          modelValuesRemoved: 0,
+          correctionRate: 1,
+        },
+      ],
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify(summary), { status: 200 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const { unmount } = render(<App />);
+    expect(await screen.findByText("4 proposed fields")).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "Line · Category Id" }),
+    ).toBeVisible();
+    expect(screen.getByText("25% correction rate")).toBeVisible();
+    unmount();
+    cleanup();
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 503 }));
+    render(<App />);
+    expect(
+      await screen.findByText("Quality feedback could not be loaded."),
+    ).toBeVisible();
+  });
   it("parses supported money forms without floating point", () => {
     expect(parseMoney("12")).toBe(1200);
     expect(parseMoney("12.3")).toBe(1230);

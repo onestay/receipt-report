@@ -348,6 +348,7 @@ describe("extraction processor", () => {
             categoryId: storeCategory.id,
             scopeKind: "store",
           },
+          categoryProvenance: "exact_rule",
         },
       ],
     });

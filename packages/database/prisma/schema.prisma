@@ -64,6 +64,7 @@ model Receipt {
   lineItems           LineItem[]
   document            ReceiptDocument?
   extractionProposals ExtractionProposal[]
+  correctionEvents    CorrectionEvent[]
 
   @@index([purchaseDate, id])
   @@index([merchantBrandId])
@@ -176,6 +177,7 @@ model ExtractionAttempt {
   validatedOutput          String?
   createdAt                DateTime            @default(now())
   proposal                 ExtractionProposal?
+  correctionEvents         CorrectionEvent[]
 
   @@unique([jobId, attemptNumber])
   @@index([completedAt, rawPurgedAt])
@@ -197,6 +199,7 @@ model ExtractionProposal {
   updatedAt                DateTime             @updatedAt
   findings                 ExtractionFinding[]
   decisions                ExtractionDecision[]
+  correctionEvents         CorrectionEvent[]
 
   @@index([receiptId, createdAt])
   @@index([documentId, normalizationRevision, status])
@@ -226,8 +229,39 @@ model ExtractionDecision {
   differences          String?
   acknowledgedWarnings String?
   decidedAt            DateTime           @default(now())
+  correctionEvents     CorrectionEvent[]
 
   @@index([proposalId, decidedAt])
+}
+
+/// A local, immutable field-level comparison between one AI proposal and the
+/// explicitly approved snapshot. Values are JSON so null retains its meaning.
+model CorrectionEvent {
+  id                       String             @id @default(cuid())
+  decisionId               String
+  decision                 ExtractionDecision @relation(fields: [decisionId], references: [id], onDelete: Restrict)
+  proposalId               String
+  proposal                 ExtractionProposal @relation(fields: [proposalId], references: [id], onDelete: Restrict)
+  attemptId                String
+  attempt                  ExtractionAttempt  @relation(fields: [attemptId], references: [id], onDelete: Restrict)
+  receiptId                String
+  receipt                  Receipt            @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+  extractionProfileVersion String
+  provider                 String
+  model                    String
+  fieldPath                String
+  fieldKind                String
+  sourcePosition           Int?
+  correctionKind           String
+  proposedValue            String
+  acceptedValue            String
+  createdAt                DateTime            @default(now())
+
+  @@unique([decisionId, fieldPath])
+  @@index([createdAt, fieldKind, id])
+  @@index([extractionProfileVersion, provider, model, createdAt])
+  @@index([proposalId])
+  @@index([receiptId])
 }
 
 /// Durable retry record for filesystem cleanup that could not complete after a

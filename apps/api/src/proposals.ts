@@ -1,12 +1,15 @@
 import type { Prisma } from "@prisma/client";
 import {
+  correctionQualitySummarySchema,
   extractionProposalHistorySchema,
   extractionProposalSchema,
   proposalSnapshotSchema,
   type ProposalApprove,
+  type CorrectionQualityQuery,
 } from "@receipt-report/contracts";
 import type { Database } from "@receipt-report/database";
 import {
+  correctionComparisons,
   proposalDifferences,
   validateProposal,
   type ProposalSnapshot,
@@ -167,10 +170,25 @@ export class ProposalRepository {
 
     return this.database.$transaction(async (transaction) => {
       const proposal = await transaction.extractionProposal.findFirst({
-        where: { id: proposalId, receiptId, status: "pending" },
-        include: { document: true },
+        where: { id: proposalId, receiptId },
+        include: { document: true, attempt: true, decisions: true },
       });
       if (!proposal) throw new ConflictError("Proposal is stale or superseded");
+      if (proposal.status === "approved") {
+        const prior = proposal.decisions.find(
+          (decision) => decision.kind === "approved",
+        );
+        if (
+          prior?.acceptedSnapshot &&
+          JSON.stringify(
+            proposalSnapshotSchema.parse(JSON.parse(prior.acceptedSnapshot)),
+          ) === JSON.stringify(snapshot)
+        )
+          return { status: "approved" as const };
+        throw new ConflictError("Proposal is stale or superseded");
+      }
+      if (proposal.status !== "pending")
+        throw new ConflictError("Proposal is stale or superseded");
       if (
         proposal.normalizationRevision !== input.normalizationRevision ||
         proposal.document.normalizationRevision !== input.normalizationRevision
@@ -215,7 +233,7 @@ export class ProposalRepository {
           position,
         })),
       });
-      await transaction.extractionDecision.create({
+      const decision = await transaction.extractionDecision.create({
         data: {
           proposalId,
           kind: "approved",
@@ -226,11 +244,115 @@ export class ProposalRepository {
           acknowledgedWarnings: JSON.stringify(input.acknowledgedWarningCodes),
         },
       });
+      await transaction.correctionEvent.createMany({
+        data: correctionComparisons(original, snapshot).map((comparison) => ({
+          decisionId: decision.id,
+          proposalId: proposal.id,
+          attemptId: proposal.attemptId,
+          receiptId,
+          extractionProfileVersion: proposal.extractionProfileVersion,
+          provider: proposal.attempt.provider,
+          model: proposal.attempt.model,
+          fieldPath: comparison.path,
+          fieldKind: comparison.fieldKind,
+          sourcePosition: comparison.sourcePosition,
+          correctionKind: comparison.correctionKind,
+          proposedValue: JSON.stringify(comparison.proposed),
+          acceptedValue: JSON.stringify(comparison.accepted),
+        })),
+      });
       await transaction.extractionProposal.update({
         where: { id: proposalId },
         data: { status: "approved" },
       });
       return { status: "approved" as const };
+    });
+  }
+
+  async quality(query: CorrectionQualityQuery) {
+    const events = await this.database.correctionEvent.findMany({
+      where: {
+        ...(query.profileVersion
+          ? { extractionProfileVersion: query.profileVersion }
+          : {}),
+        ...(query.provider ? { provider: query.provider } : {}),
+        ...(query.model ? { model: query.model } : {}),
+        ...(query.fieldKind ? { fieldKind: query.fieldKind } : {}),
+        ...(query.from || query.to
+          ? {
+              createdAt: {
+                ...(query.from
+                  ? { gte: new Date(`${query.from}T00:00:00.000Z`) }
+                  : {}),
+                ...(query.to
+                  ? {
+                      lt: new Date(
+                        new Date(`${query.to}T00:00:00.000Z`).getTime() +
+                          86_400_000,
+                      ),
+                    }
+                  : {}),
+              },
+            }
+          : {}),
+      },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    });
+    type Counts = {
+      proposedFields: number;
+      changedFields: number;
+      unchangedFields: number;
+      missingFilled: number;
+      modelValuesRemoved: number;
+    };
+    const blank = (): Counts => ({
+      proposedFields: 0,
+      changedFields: 0,
+      unchangedFields: 0,
+      missingFilled: 0,
+      modelValuesRemoved: 0,
+    });
+    const increment = (counts: Counts, kind: string) => {
+      counts.proposedFields++;
+      if (kind === "unchanged") counts.unchangedFields++;
+      else counts.changedFields++;
+      if (kind === "missing_filled") counts.missingFilled++;
+      if (kind === "value_removed") counts.modelValuesRemoved++;
+    };
+    const totals = blank();
+    const grouped = new Map<string, Counts>();
+    for (const event of events) {
+      increment(totals, event.correctionKind);
+      const key = JSON.stringify([
+        event.extractionProfileVersion,
+        event.provider,
+        event.model,
+        event.fieldKind,
+      ]);
+      const counts = grouped.get(key) ?? blank();
+      increment(counts, event.correctionKind);
+      grouped.set(key, counts);
+    }
+    const rate = (counts: Counts) =>
+      counts.proposedFields === 0
+        ? 0
+        : counts.changedFields / counts.proposedFields;
+    return correctionQualitySummarySchema.parse({
+      filters: query,
+      totals: { ...totals, correctionRate: rate(totals) },
+      buckets: [...grouped.entries()].map(([key, counts]) => {
+        const [profileVersion, provider, model, fieldKind] = JSON.parse(
+          key,
+        ) as string[];
+        return {
+          profileVersion,
+          provider,
+          model,
+          fieldKind,
+          ...counts,
+          correctionRate: rate(counts),
+        };
+      }),
     });
   }
 

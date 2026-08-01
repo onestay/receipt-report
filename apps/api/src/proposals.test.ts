@@ -198,6 +198,80 @@ describe("proposal API", () => {
       actor: "local-user",
     });
     expect(JSON.stringify(history.body)).not.toContain("rawProviderOutput");
+    const events = await database.correctionEvent.findMany({
+      where: { proposalId: seeded.proposal.id },
+    });
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        fieldPath: "merchantRaw",
+        correctionKind: "unchanged",
+        provider: "fake",
+        model: "fake-v1",
+      }),
+    );
+  });
+
+  it("records idempotent corrections and reproducible filtered quality", async () => {
+    const emptyQuality = await request(app())
+      .get("/api/v1/extraction-quality")
+      .expect(200);
+    expect(emptyQuality.body.totals).toMatchObject({
+      proposedFields: 0,
+      correctionRate: 0,
+    });
+    const seeded = await seed();
+    const accepted = snapshot();
+    accepted.purchaseTime = "10:30";
+    accepted.netCents = null;
+    const first = accepted.lineItems[0];
+    if (!first) throw new Error("Missing line fixture");
+    first.description = "Mehrwegpfand";
+    const body = {
+      receiptUpdatedAt: seeded.receipt.updatedAt.toISOString(),
+      normalizationRevision: "revision-1",
+      snapshot: accepted,
+      acknowledgedWarningCodes: [],
+    };
+    const path = `/api/v1/receipts/${seeded.receipt.id}/extraction-proposals/${seeded.proposal.id}/approve`;
+    await request(app()).post(path).send(body).expect(200);
+    await request(app()).post(path).send(body).expect(200);
+    const events = await database.correctionEvent.findMany({
+      where: { proposalId: seeded.proposal.id },
+    });
+    expect(
+      events.filter((item) => item.correctionKind !== "unchanged"),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          fieldPath: "purchaseTime",
+          correctionKind: "missing_filled",
+        }),
+        expect.objectContaining({
+          fieldPath: "lineItems.0.description",
+          correctionKind: "changed",
+        }),
+      ]),
+    );
+    expect(await database.extractionDecision.count()).toBe(1);
+    const quality = await request(app())
+      .get(
+        "/api/v1/extraction-quality?profileVersion=de-receipt-v1&model=fake-v1&fieldKind=purchaseTime&from=2026-01-01&to=2026-12-31",
+      )
+      .expect(200);
+    expect(quality.body.totals).toMatchObject({
+      proposedFields: 1,
+      changedFields: 1,
+      missingFilled: 1,
+      correctionRate: 1,
+    });
+    expect(quality.body.buckets).toHaveLength(1);
+    const unfiltered = await request(app())
+      .get("/api/v1/extraction-quality?provider=fake&to=2026-12-31")
+      .expect(200);
+    expect(unfiltered.body.totals).toMatchObject({
+      proposedFields: events.length,
+      modelValuesRemoved: 1,
+    });
   });
 
   it("revalidates edits and enforces warnings and receipt/document CAS", async () => {

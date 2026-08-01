@@ -215,6 +215,11 @@ describe("extraction job migration", () => {
       join(testMigrationsDirectory, "20260731141500_extraction_proposals"),
       { recursive: true },
     );
+    await cp(
+      join(sourceMigrationsDirectory, "20260801070000_correction_feedback"),
+      join(testMigrationsDirectory, "20260801070000_correction_feedback"),
+      { recursive: true },
+    );
     deploy(databaseUrl, testSchemaPath);
     database = await createDatabase(databaseUrl);
     expect(
@@ -232,5 +237,6 @@ describe("extraction job migration", () => {
     expect(
       await database.$queryRawUnsafe<unknown[]>("PRAGMA foreign_key_check"),
     ).toEqual([]);
+    expect(await database.correctionEvent.count()).toBe(0);
   }, 30_000);
 });

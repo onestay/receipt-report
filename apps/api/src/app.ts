@@ -12,6 +12,7 @@ import {
   categoryListQuerySchema,
   categoryReorderSchema,
   categoryUpdateSchema,
+  correctionQualityQuerySchema,
   documentUploadConfigurationSchema,
   healthResponseSchema,
   idSchema,
@@ -425,6 +426,17 @@ export function createApp(options: AppOptions = {}): Express {
         options.database,
         options.extractionConfig.maxAttempts,
       );
+      app.get("/api/v1/extraction-quality", async (request, response, next) => {
+        try {
+          response.json(
+            await proposals.quality(
+              correctionQualityQuerySchema.parse(request.query),
+            ),
+          );
+        } catch (error) {
+          next(error);
+        }
+      });
       app.get(
         "/api/v1/receipts/:id/extraction-proposal",
         async (request, response, next) => {

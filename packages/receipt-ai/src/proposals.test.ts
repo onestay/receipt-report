@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  correctionComparisons,
   extractionToProposal,
   proposalDifferences,
   proposalSnapshotSchema,
@@ -265,5 +266,46 @@ describe("proposal validation", () => {
     expect(proposalDifferences(original, accepted)).toEqual([
       { path: "totalCents", proposed: 100, accepted: 101 },
     ]);
+  });
+
+  it("classifies field and conservative line-position feedback", () => {
+    const original = snapshot();
+    original.purchaseTime = null;
+    firstLine(original).categoryId = "clx0000000000000000000001";
+    const accepted = snapshot();
+    accepted.purchaseTime = "12:35";
+    firstLine(accepted).categoryId = null;
+    firstLine(accepted).description = "Apfel rot";
+    const comparisons = correctionComparisons(original, accepted);
+    expect(comparisons).toContainEqual(
+      expect.objectContaining({
+        path: "purchaseTime",
+        correctionKind: "missing_filled",
+      }),
+    );
+    expect(comparisons).toContainEqual(
+      expect.objectContaining({
+        path: "lineItems.0.categoryId",
+        sourcePosition: 0,
+        correctionKind: "value_removed",
+      }),
+    );
+    expect(comparisons).toContainEqual(
+      expect.objectContaining({
+        path: "lineItems.0.description",
+        correctionKind: "changed",
+      }),
+    );
+    expect(
+      comparisons.find((item) => item.path === "merchantRaw"),
+    ).toMatchObject({ correctionKind: "unchanged" });
+    accepted.lineItems = [];
+    expect(correctionComparisons(original, accepted)).toContainEqual(
+      expect.objectContaining({
+        path: "lineItems.0.description",
+        accepted: null,
+        correctionKind: "value_removed",
+      }),
+    );
   });
 });
