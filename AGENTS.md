@@ -49,6 +49,12 @@ These instructions apply to the entire repository.
 ## Documentation and decisions
 
 - Update documentation when behavior, architecture, or contracts change.
+- Treat the README configuration tables as the authoritative environment-variable
+  reference. Adding, removing, renaming, changing the default of, or changing
+  the meaning of a variable requires updating those tables, `packages/config`,
+  affected Compose files, and `.env.example` and/or `.env.production.example`
+  in the same pull request. Example files must contain placeholders only, never
+  real credentials or sensitive endpoints.
 - Record foundational or difficult-to-reverse choices as a short ADR under
   `docs/decisions/`.
 - Do not reverse an accepted ADR incidentally within an unrelated issue.

@@ -13,6 +13,8 @@ same release and pin `RECEIPT_REPORT_API_IMAGE` and
 `RECEIPT_REPORT_WORKER_IMAGE` to immutable tags or digests. Copy
 `.env.production.example` to `.env.production`, make it readable only by its
 owner (`chmod 600`), and replace every placeholder. Never commit that file.
+The authoritative variable reference, including defaults and service ownership,
+is in the [README configuration section](../README.md#configuration).
 
 This repository does not publish registry images yet. A clean host can build a
 selected signed/reviewed git release locally, then use those exact local tags:
@@ -73,6 +75,7 @@ point in time.
 
 ```bash
 mkdir -p backups
+set -a; . ./.env.production; set +a
 ./scripts/backup-compose.sh backups
 # copy both .tar.gz and .sha256 off-host and protect them like the receipts
 ```
@@ -88,6 +91,7 @@ pre-upgrade backup; migration files are forward-only and are not manually
 reversed.
 
 ```bash
+set -a; . ./.env.production; set +a
 ./scripts/restore-compose.sh backups/receipt-report-YYYYMMDDTHHMMSSZ.tar.gz
 ```
 
