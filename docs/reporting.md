@@ -38,6 +38,14 @@ raw merchant, and approval-provenance filters.
 processing, needs-review, and failed receipt workflows. These operational counts
 never carry amounts or filter financial totals.
 
+The `/insights` screen is the reloadable, responsive presentation of these two
+endpoints. Selected financial filters live in the URL, while workflow counts
+remain visually separate and link to `workflow`-filtered receipt lists. Report
+bucket links retain the API's receipt-list query semantics. The client clears
+prior amounts before each request, ignores superseded responses, and keeps a
+successful financial report visible if only the operational summary is
+temporarily unavailable.
+
 SQLite uses the existing `Receipt_purchaseDate_id_idx` index for bounded date
 ranges and stable receipt pagination. Category and merchant relations use their
 existing foreign-key indexes. This is appropriate for a personal ledger; no new

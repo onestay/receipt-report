@@ -432,6 +432,18 @@ describe("spending reports", () => {
       needsReview: 1,
       failed: 2,
     });
+    for (const [state, count] of Object.entries({
+      preparing: 1,
+      queued: 2,
+      processing: 1,
+      "needs-review": 1,
+      failed: 2,
+    })) {
+      const list = await request(app())
+        .get(`/api/v1/receipts?workflow=${state}`)
+        .expect(200);
+      expect(list.body.receipts, state).toHaveLength(count);
+    }
     const spend = await request(app())
       .get("/api/v1/reports/spending?from=2026-04-01&to=2026-04-01")
       .expect(200);

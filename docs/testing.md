@@ -102,6 +102,11 @@ Every pull request must run:
    representative desktop and mobile viewports, embedded as Markdown images or
    stable image links in the pull request description
 
+The spending-dashboard journey creates synthetic canonical receipts, exercises
+composed URL filters and receipt drill-downs, checks 320px overflow, and captures
+populated, uncategorized, empty, and API-error states under
+`docs/screenshots/issue-41/`.
+
 CI publishes a browsable coverage report and Playwright failure artifacts. Test
 commands must also be runnable locally through stable root-level package scripts.
 Branch protection should require these checks once their workflow names exist.
