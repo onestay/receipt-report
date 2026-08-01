@@ -381,6 +381,27 @@ describe("OpenAI-compatible adapter", () => {
     expect(captured?.body).toContain(GERMAN_RECEIPT_PROFILE_VERSION);
     expect(captured?.body).toContain('"type":["integer","null"]');
     expect(captured?.body).not.toContain('"anyOf"');
+    // The provider rejects these keywords in a strict schema.
+    for (const keyword of [
+      "minimum",
+      "maximum",
+      "minLength",
+      "maxLength",
+      "multipleOf",
+      "minItems",
+      "maxItems",
+    ]) {
+      expect(captured?.body).not.toContain(`"${keyword}"`);
+    }
+    // Enumerated values carry null inside the enum and declare no `type`.
+    expect(captured?.body).toContain('"enum":["EUR",null]');
+    expect(captured?.body).not.toContain('"type":["string","null"],"enum"');
+    // Confidence is enumerated so it does not consume the 16-union budget.
+    expect(captured?.body).toContain(
+      '"confidence":{"enum":[0,0.25,0.5,0.75,1,null]}',
+    );
+    const unionCount = (captured?.body.match(/"type":\[/g) ?? []).length;
+    expect(unionCount).toBeLessThanOrEqual(16);
     expect(germanReceiptProfile.systemPrompt).toContain("Erfinde keine");
   });
 

@@ -42,6 +42,18 @@ Provider SDK types must not leak into domain or API contracts.
 9. Save the proposed extraction for user review.
 10. Preserve approved user corrections during any later reprocessing.
 
+Step 4 emits a schema a strict structured-output provider will compile. Such a
+provider rejects numeric and string constraints, rejects an `enum` declared
+next to a union type, and caps a request at sixteen union-typed parameters.
+The request schema therefore omits keywords like `minimum` and `minLength`,
+gives enumerated values their null case inside the enum rather than in a union
+`type`, and enumerates confidence as one of `0`, `0.25`, `0.5`, `0.75`, `1`, or
+null. Confidence is consequently a coarse provider self-report rather than a
+continuous value. Removing a keyword from the request never weakens validation:
+step 6 still enforces every bound, and the date and time fields additionally
+carry patterns matching the formats the domain schema accepts, so the provider
+constrains the reply instead of it failing after arrival.
+
 Successful current attempts publish an editable proposal rather than updating
 the receipt. Proposal findings are deterministic and stable-coded; provider
 confidence is retained separately. Approval revalidates the edited snapshot,
