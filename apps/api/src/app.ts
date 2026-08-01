@@ -26,6 +26,7 @@ import {
   receiptIdSchema,
   receiptListQuerySchema,
   receiptUpdateSchema,
+  spendingReportQuerySchema,
   proposalApproveSchema,
   type ApiError,
 } from "@receipt-report/contracts";
@@ -51,6 +52,7 @@ import { MerchantRepository } from "./merchants.js";
 import { stageMultipartDocument } from "./multipart.js";
 import { ReceiptRepository } from "./receipts.js";
 import { ProposalRepository } from "./proposals.js";
+import { ReportRepository } from "./reports.js";
 
 export type AppOptions = {
   webDistDirectory?: string;
@@ -370,10 +372,29 @@ export function createApp(options: AppOptions = {}): Express {
     );
 
     const receipts = new ReceiptRepository(options.database);
+    const reports = new ReportRepository(options.database);
+    app.get("/api/v1/reports/spending", async (request, response, next) => {
+      try {
+        response.json(
+          await reports.spending(
+            spendingReportQuerySchema.parse(request.query),
+          ),
+        );
+      } catch (error) {
+        next(error);
+      }
+    });
+    app.get("/api/v1/reports/workflow", async (_request, response, next) => {
+      try {
+        response.json(await reports.workflow());
+      } catch (error) {
+        next(error);
+      }
+    });
     app.get("/api/v1/receipts", async (request, response, next) => {
       try {
         const query = receiptListQuerySchema.parse(request.query);
-        response.json(await receipts.list(query.limit, query.cursor));
+        response.json(await receipts.list(query));
       } catch (error) {
         next(error);
       }

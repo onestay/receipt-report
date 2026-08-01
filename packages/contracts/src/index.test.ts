@@ -17,14 +17,39 @@ import {
   receiptCreateSchema,
   receiptDateSchema,
   receiptDocumentSchema,
+  receiptListQuerySchema,
   receiptTimeSchema,
   receiptUpdateSchema,
+  spendingReportQuerySchema,
 } from "./index.js";
 
 /** Field separator used by the canonical address key. */
 const separator = "\u001F";
 const brandId = "clx0000000000000000000000";
 const storeId = "clx1111111111111111111111";
+
+describe("report query contracts", () => {
+  it("parses explicit query booleans without treating false as truthy", () => {
+    expect(
+      receiptListQuerySchema.parse({ categorySubtree: "false" })
+        .categorySubtree,
+    ).toBe(false);
+    expect(
+      spendingReportQuerySchema.parse({
+        from: "2026-01-01",
+        to: "2026-01-31",
+        categorySubtree: "true",
+      }).categorySubtree,
+    ).toBe(true);
+    expect(
+      spendingReportQuerySchema.safeParse({
+        from: "2026-01-01",
+        to: "2026-01-31",
+        categorySubtree: "yes",
+      }).success,
+    ).toBe(false);
+  });
+});
 
 describe("healthResponseSchema", () => {
   it("accepts the public health response", () => {
