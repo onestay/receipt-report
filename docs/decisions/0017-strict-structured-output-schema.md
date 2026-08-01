@@ -1,4 +1,4 @@
-# ADR 0013: Shape the extraction request for strict structured outputs
+# ADR 0017: Shape the extraction request for strict structured outputs
 
 - Status: Accepted
 - Date: 2026-08-01
