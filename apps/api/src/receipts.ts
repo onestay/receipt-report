@@ -298,6 +298,9 @@ export class ReceiptRepository {
         ],
       },
       orderBy: [{ purchaseDate: "desc" }, { id: "desc" }],
+      ...(query.provenance || query.category === "unallocated-adjustment"
+        ? {}
+        : { take: query.limit + 1 }),
       include: {
         ...merchantInclude,
         lineItems: { select: { lineTotalCents: true } },

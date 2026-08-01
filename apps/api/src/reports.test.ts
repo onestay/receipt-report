@@ -271,7 +271,7 @@ describe("spending reports", () => {
       )
       .expect(200);
     expect(filtered.body.totals).toMatchObject({
-      grossCents: 202,
+      grossCents: 201,
       receiptCount: 1,
     });
     const direct = await request(app())
@@ -279,13 +279,84 @@ describe("spending reports", () => {
         `/api/v1/reports/spending?from=2026-03-01&to=2026-03-31&categoryId=${parent.id}&categorySubtree=false`,
       )
       .expect(200);
-    expect(direct.body.totals.grossCents).toBe(202);
+    expect(direct.body.totals.grossCents).toBe(201);
     const list = await request(app())
       .get(filtered.body.rawMerchants[0].drillDownUrl)
       .expect(200);
     expect(list.body.receipts.map((item: { id: string }) => item.id)).toEqual([
       two.id,
     ]);
+  });
+
+  it("scopes category-filtered amounts to matching lines on mixed receipts", async () => {
+    const food = await database.category.create({
+      data: {
+        name: "Scoped food",
+        normalizedName: "scoped food",
+        position: 902,
+      },
+    });
+    const household = await database.category.create({
+      data: {
+        name: "Scoped household",
+        normalizedName: "scoped household",
+        position: 903,
+      },
+    });
+    await database.receipt.create({
+      data: {
+        merchantRaw: "Mixed Markt",
+        purchaseDate: "2026-03-10",
+        totalCents: 500,
+        netCents: 420,
+        taxCents: 80,
+        lineItems: {
+          create: [
+            {
+              description: "Food",
+              lineTotalCents: 200,
+              position: 0,
+              categoryId: food.id,
+            },
+            {
+              description: "Household",
+              lineTotalCents: 300,
+              position: 1,
+              categoryId: household.id,
+            },
+          ],
+        },
+      },
+    });
+    const filtered = await request(app())
+      .get(
+        `/api/v1/reports/spending?from=2026-03-01&to=2026-03-31&categoryId=${food.id}`,
+      )
+      .expect(200);
+    expect(filtered.body.totals).toEqual({
+      grossCents: 200,
+      receiptCount: 1,
+      averageReceiptCents: 200,
+      netCents: null,
+      taxCents: null,
+      coverage: { receipts: 1, net: 0, tax: 0 },
+    });
+    expect(filtered.body.categories).toEqual([
+      expect.objectContaining({ key: food.id, grossCents: 200 }),
+    ]);
+    for (const name of [
+      "monthly",
+      "categories",
+      "merchantBrands",
+      "merchantStores",
+      "rawMerchants",
+    ])
+      expect(
+        filtered.body[name].reduce(
+          (sum: number, item: { grossCents: number }) => sum + item.grossCents,
+          0,
+        ),
+      ).toBe(200);
   });
 
   it("is explicit for empty ranges and rejects reversed dates", async () => {
@@ -336,6 +407,21 @@ describe("spending reports", () => {
       data: { normalizationStatus: "failed" },
     });
     await receipt("Manual without document", "2026-04-01", 100);
+    const noJob = await receipt("Normalized without job", "2026-04-01", 100);
+    await database.receiptDocument.create({
+      data: {
+        receiptId: noJob.id,
+        relativePath: `reports/${noJob.id}.png`,
+        mediaType: "image/png",
+        byteSize: 1,
+        sha256: noJob.id.padEnd(64, "e").slice(0, 64),
+        normalizationStatus: "complete",
+        normalizationProfileVersion: "receipt-page-v1",
+        normalizationRevision: `rev-${noJob.id}`,
+      },
+    });
+    const reviewed = await receipt("Already reviewed", "2026-04-01", 100);
+    await proposals(reviewed.id, 1, "approved");
     const workflow = await request(app())
       .get("/api/v1/reports/workflow")
       .expect(200);
@@ -350,8 +436,8 @@ describe("spending reports", () => {
       .get("/api/v1/reports/spending?from=2026-04-01&to=2026-04-01")
       .expect(200);
     expect(spend.body.totals).toMatchObject({
-      receiptCount: 8,
-      grossCents: 800,
+      receiptCount: 10,
+      grossCents: 1000,
     });
   });
 

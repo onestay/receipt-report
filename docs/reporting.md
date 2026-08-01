@@ -16,6 +16,11 @@ nullable and sum only receipts whose canonical values are present; coverage
 counts make partial data explicit. Empty ranges return zero gross/count and
 null average/net/tax.
 
+A category filter scopes gross, average, month, and merchant amounts to matching
+canonical line items. Net and tax cannot be allocated to individual categories
+without inventing data, so they are null with zero coverage for category-scoped
+reports.
+
 Monthly and merchant buckets use canonical receipt totals. Category buckets use
 canonical line totals. Any difference between a receipt total and its line sum
 is placed in an `unallocated-adjustment` bucket, so every breakdown reconciles

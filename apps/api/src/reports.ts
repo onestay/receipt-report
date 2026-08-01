@@ -88,9 +88,30 @@ export class ReportRepository {
     const selected = query.provenance
       ? receipts.filter((item) => provenance(item) === query.provenance)
       : receipts;
-    const grossCents = selected.reduce((sum, item) => sum + item.totalCents, 0);
-    const net = selected.filter((item) => item.netCents !== null);
-    const tax = selected.filter((item) => item.taxCents !== null);
+    const scopedGross = new Map(
+      selected.map((receipt) => [
+        receipt.id,
+        categoryIds
+          ? receipt.lineItems
+              .filter(
+                (line) =>
+                  line.categoryId !== null &&
+                  categoryIds.includes(line.categoryId),
+              )
+              .reduce((sum, line) => sum + line.lineTotalCents, 0)
+          : receipt.totalCents,
+      ]),
+    );
+    const grossCents = selected.reduce(
+      (sum, item) => sum + (scopedGross.get(item.id) ?? 0),
+      0,
+    );
+    const net = categoryIds
+      ? []
+      : selected.filter((item) => item.netCents !== null);
+    const tax = categoryIds
+      ? []
+      : selected.filter((item) => item.taxCents !== null);
     const buckets = (kind: "month" | "brand" | "store" | "raw") => {
       const map = new Map<string, Bucket>();
       for (const receipt of selected) {
@@ -127,7 +148,7 @@ export class ReportRepository {
           grossCents: 0,
           receipts: new Set<string>(),
         };
-        bucket.grossCents += receipt.totalCents;
+        bucket.grossCents += scopedGross.get(receipt.id) ?? 0;
         bucket.receipts.add(receipt.id);
         map.set(value.key, bucket);
       }
@@ -150,6 +171,11 @@ export class ReportRepository {
     for (const receipt of selected) {
       let allocated = 0;
       for (const line of receipt.lineItems) {
+        if (
+          categoryIds &&
+          (line.categoryId === null || !categoryIds.includes(line.categoryId))
+        )
+          continue;
         allocated += line.lineTotalCents;
         const key = line.categoryId ?? "uncategorized";
         const label = line.category
@@ -169,7 +195,7 @@ export class ReportRepository {
         bucket.receipts.add(receipt.id);
         categoryMap.set(key, bucket);
       }
-      const adjustment = receipt.totalCents - allocated;
+      const adjustment = categoryIds ? 0 : receipt.totalCents - allocated;
       if (adjustment !== 0) {
         const key = "unallocated-adjustment";
         const bucket = categoryMap.get(key) ?? {
