@@ -400,8 +400,10 @@ describe("OpenAI-compatible adapter", () => {
     expect(captured?.body).toContain(
       '"confidence":{"enum":[0,0.25,0.5,0.75,1,null]}',
     );
+    // The provider caps a strict schema at 16 union-typed parameters. Pin the
+    // exact count: spending more of that budget should be a deliberate change.
     const unionCount = (captured?.body.match(/"type":\[/g) ?? []).length;
-    expect(unionCount).toBeLessThanOrEqual(16);
+    expect(unionCount).toBe(14);
     expect(germanReceiptProfile.systemPrompt).toContain("Erfinde keine");
   });
 
