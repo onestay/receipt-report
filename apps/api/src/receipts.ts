@@ -6,6 +6,7 @@ import {
   type ReceiptCreate,
   type ReceiptDetail,
   type ReceiptList,
+  type ReceiptListQuery,
   type ReceiptUpdate,
 } from "@receipt-report/contracts";
 import {
@@ -246,25 +247,90 @@ export class ReceiptRepository {
     return detail(record);
   }
 
-  async list(limit: number, cursorValue?: string): Promise<ReceiptList> {
-    const cursor = cursorValue ? decodeCursor(cursorValue) : undefined;
+  async list(query: ReceiptListQuery): Promise<ReceiptList> {
+    const cursor = query.cursor ? decodeCursor(query.cursor) : undefined;
+    let categoryIds = query.categoryId ? [query.categoryId] : undefined;
+    if (query.categoryId && query.categorySubtree) {
+      const children = await this.database.category.findMany({
+        where: { parentId: query.categoryId },
+        select: { id: true },
+      });
+      categoryIds = [query.categoryId, ...children.map((item) => item.id)];
+    }
     const records = await this.database.receipt.findMany({
-      ...(cursor
-        ? {
-            where: {
-              OR: [
-                { purchaseDate: { lt: cursor.purchaseDate } },
-                { purchaseDate: cursor.purchaseDate, id: { lt: cursor.id } },
-              ],
-            },
-          }
-        : {}),
+      where: {
+        AND: [
+          ...(cursor
+            ? [
+                {
+                  OR: [
+                    { purchaseDate: { lt: cursor.purchaseDate } },
+                    {
+                      purchaseDate: cursor.purchaseDate,
+                      id: { lt: cursor.id },
+                    },
+                  ],
+                },
+              ]
+            : []),
+          ...(query.from ? [{ purchaseDate: { gte: query.from } }] : []),
+          ...(query.to ? [{ purchaseDate: { lte: query.to } }] : []),
+          ...(query.month
+            ? [{ purchaseDate: { startsWith: query.month } }]
+            : []),
+          ...(query.merchantBrandId
+            ? [{ merchantBrandId: query.merchantBrandId }]
+            : []),
+          ...(query.merchantStoreId
+            ? [{ merchantStoreId: query.merchantStoreId }]
+            : []),
+          ...(query.merchantBrand ? [{ merchantBrandId: null }] : []),
+          ...(query.merchantStore ? [{ merchantStoreId: null }] : []),
+          ...(query.merchantQuery
+            ? [{ merchantRaw: { contains: query.merchantQuery } }]
+            : []),
+          ...(categoryIds
+            ? [{ lineItems: { some: { categoryId: { in: categoryIds } } } }]
+            : []),
+          ...(query.category === "uncategorized"
+            ? [{ lineItems: { some: { categoryId: null } } }]
+            : []),
+        ],
+      },
       orderBy: [{ purchaseDate: "desc" }, { id: "desc" }],
-      take: limit + 1,
-      include: { ...merchantInclude, _count: { select: { lineItems: true } } },
+      include: {
+        ...merchantInclude,
+        lineItems: { select: { lineTotalCents: true } },
+        extractionProposals: { select: { status: true } },
+        _count: { select: { lineItems: true } },
+      },
     });
-    const hasMore = records.length > limit;
-    const page = records.slice(0, limit);
+    const matching =
+      query.category === "unallocated-adjustment"
+        ? records.filter(
+            (record) =>
+              record.lineItems.reduce(
+                (sum, item) => sum + item.lineTotalCents,
+                0,
+              ) !== record.totalCents,
+          )
+        : records;
+    const classified = query.provenance
+      ? matching.filter((record) => {
+          const approved = record.extractionProposals.filter(
+            (item) => item.status === "approved",
+          ).length;
+          const value =
+            approved === 0
+              ? "manual"
+              : approved === 1
+                ? "ai_approved"
+                : "ai_reprocessed";
+          return value === query.provenance;
+        })
+      : matching;
+    const hasMore = classified.length > query.limit;
+    const page = classified.slice(0, query.limit);
     const last = page.at(-1);
     return receiptListSchema.parse({
       receipts: page.map((record) =>

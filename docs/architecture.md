@@ -1,5 +1,9 @@
 # Architecture
 
+Versioned reporting endpoints aggregate only canonical receipt data. Financial
+reports and amount-free workflow-state summaries are deliberately separate; see
+`docs/reporting.md` and ADR 0015.
+
 `CorrectionEvent` is immutable approval audit data linked to its decision,
 proposal, attempt, profile, provider, and model. It records stable field paths
 and conservative proposal-line positions, enabling reproducible local extraction

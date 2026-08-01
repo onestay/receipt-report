@@ -491,9 +491,33 @@ export const receiptListSchema = z.object({
   receipts: z.array(receiptSummarySchema),
   nextCursor: z.string().nullable(),
 });
+export const spendingProvenanceSchema = z.enum([
+  "manual",
+  "ai_approved",
+  "ai_reprocessed",
+]);
+const queryBooleanSchema = z.preprocess(
+  (value) => (value === "true" ? true : value === "false" ? false : value),
+  z.boolean(),
+);
 export const receiptListQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(100).default(25),
   cursor: z.string().min(1).optional(),
+  from: receiptDateSchema.optional(),
+  to: receiptDateSchema.optional(),
+  month: z
+    .string()
+    .regex(/^\d{4}-\d{2}$/)
+    .optional(),
+  categoryId: idSchema.optional(),
+  categorySubtree: queryBooleanSchema.default(false),
+  category: z.enum(["uncategorized", "unallocated-adjustment"]).optional(),
+  merchantBrandId: idSchema.optional(),
+  merchantStoreId: idSchema.optional(),
+  merchantBrand: z.literal("unassigned").optional(),
+  merchantStore: z.literal("unassigned").optional(),
+  merchantQuery: z.string().trim().min(1).max(200).optional(),
+  provenance: spendingProvenanceSchema.optional(),
 });
 
 export const apiErrorCodeSchema = z.enum([
@@ -705,6 +729,68 @@ export const correctionQualitySummarySchema = z.object({
   }),
   buckets: z.array(correctionQualityBucketSchema),
 });
+
+export const spendingReportQuerySchema = z
+  .object({
+    from: receiptDateSchema,
+    to: receiptDateSchema,
+    categoryId: idSchema.optional(),
+    categorySubtree: queryBooleanSchema.default(false),
+    merchantBrandId: idSchema.optional(),
+    merchantStoreId: idSchema.optional(),
+    merchantQuery: z.string().trim().min(1).max(200).optional(),
+    provenance: spendingProvenanceSchema.optional(),
+  })
+  .strict()
+  .refine((value) => value.from <= value.to, {
+    message: "from must not be after to",
+    path: ["to"],
+  });
+const spendingCoverageSchema = z.object({
+  receipts: z.number().int().nonnegative(),
+  net: z.number().int().nonnegative(),
+  tax: z.number().int().nonnegative(),
+});
+const spendingTotalsSchema = z.object({
+  grossCents: z.number().int().safe(),
+  receiptCount: z.number().int().nonnegative(),
+  averageReceiptCents: z.number().int().nullable(),
+  netCents: z.number().int().safe().nullable(),
+  taxCents: z.number().int().safe().nullable(),
+  coverage: spendingCoverageSchema,
+});
+const spendingBreakdownSchema = z.object({
+  key: z.string(),
+  label: z.string().min(1),
+  grossCents: z.number().int().safe(),
+  receiptCount: z.number().int().nonnegative(),
+  drillDownUrl: z.string().startsWith("/api/v1/receipts?"),
+});
+export const spendingReportSchema = z.object({
+  timezone: z.literal("Europe/Berlin"),
+  range: z.object({ from: receiptDateSchema, to: receiptDateSchema }),
+  filters: z.object({
+    categoryId: idSchema.optional(),
+    categorySubtree: z.boolean(),
+    merchantBrandId: idSchema.optional(),
+    merchantStoreId: idSchema.optional(),
+    merchantQuery: z.string().optional(),
+    provenance: spendingProvenanceSchema.optional(),
+  }),
+  totals: spendingTotalsSchema,
+  monthly: z.array(spendingBreakdownSchema),
+  categories: z.array(spendingBreakdownSchema),
+  merchantBrands: z.array(spendingBreakdownSchema),
+  merchantStores: z.array(spendingBreakdownSchema),
+  rawMerchants: z.array(spendingBreakdownSchema),
+});
+export const spendingWorkflowSummarySchema = z.object({
+  preparing: z.number().int().nonnegative(),
+  queued: z.number().int().nonnegative(),
+  processing: z.number().int().nonnegative(),
+  needsReview: z.number().int().nonnegative(),
+  failed: z.number().int().nonnegative(),
+});
 export const NORMALIZATION_PROFILE_VERSION = "receipt-page-v1";
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 const relativeStoragePathSchema = z
@@ -821,6 +907,7 @@ export type ReceiptPageResponse = z.infer<typeof receiptPageResponseSchema>;
 export type ReceiptSummary = z.infer<typeof receiptSummarySchema>;
 export type ReceiptDetail = z.infer<typeof receiptDetailSchema>;
 export type ReceiptList = z.infer<typeof receiptListSchema>;
+export type ReceiptListQuery = z.infer<typeof receiptListQuerySchema>;
 export type ApiError = z.infer<typeof apiErrorSchema>;
 export type ReceiptDocument = z.infer<typeof receiptDocumentSchema>;
 export type ReceiptPage = z.infer<typeof receiptPageSchema>;
@@ -834,3 +921,5 @@ export type CorrectionQualityQuery = z.infer<
 export type CorrectionQualitySummary = z.infer<
   typeof correctionQualitySummarySchema
 >;
+export type SpendingReportQuery = z.infer<typeof spendingReportQuerySchema>;
+export type SpendingReport = z.infer<typeof spendingReportSchema>;
