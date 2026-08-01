@@ -94,9 +94,11 @@ reversed.
 Restore replaces the selected named volume, verifies the archive checksum when
 present, runs migrations, and starts the pinned release. Restore only into an
 empty/replacement environment or when discarding its current state is intended.
-Run the isolated, temporary-volume recovery check with
-`pnpm compose:restore-drill`; it verifies hashes for the database, WAL,
-documents, and representative proposal/correction/reporting state.
+Run the isolated production-stack recovery check with
+`pnpm compose:restore-drill`; it builds pinned local images, exercises the full
+fake-provider workflow, invokes the real backup and restore commands, and
+verifies that documents, approvals, corrections, and reporting state survive
+while post-backup state is removed.
 
 ## Provider privacy and lifecycle
 

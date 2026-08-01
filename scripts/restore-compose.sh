@@ -5,7 +5,11 @@ archive="${1:?Usage: scripts/restore-compose.sh BACKUP_ARCHIVE}"
 compose_file="${COMPOSE_FILE:-compose.production.yaml}"
 volume="${RECEIPT_REPORT_DATA_VOLUME:-receipt-report-data}"
 archive="$(cd "$(dirname "$archive")" && pwd)/$(basename "$archive")"
-test -f "$archive.sha256" && (cd "$(dirname "$archive")" && sha256sum -c "$(basename "$archive").sha256")
+if [[ -f "$archive.sha256" ]]; then
+  (cd "$(dirname "$archive")" && sha256sum -c "$(basename "$archive").sha256")
+else
+  echo "Warning: checksum sidecar is absent; archive integrity was not verified" >&2
+fi
 
 docker compose -f "$compose_file" down
 docker volume create "$volume" >/dev/null

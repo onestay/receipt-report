@@ -23,7 +23,7 @@
     "test:e2e": "pnpm build && playwright test",
     "compose:config": "docker compose config",
     "compose:smoke": "bash scripts/compose-smoke.sh",
-    "compose:restore-drill": "bash scripts/backup-restore-drill.sh"
+    "compose:restore-drill": "bash scripts/production-compose-smoke.sh"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

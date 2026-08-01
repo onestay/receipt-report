@@ -53,11 +53,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker compose config --quiet
-      - name: Validate pinned production Compose contract
-        env:
-          RECEIPT_REPORT_API_IMAGE: receipt-report-api:ci
-          RECEIPT_REPORT_WORKER_IMAGE: receipt-report-worker:ci
-          RECEIPT_REPORT_SECRETS_FILE: .env.production.example
-        run: docker compose -f compose.production.yaml config --quiet
       - run: bash scripts/compose-smoke.sh
-      - run: bash scripts/backup-restore-drill.sh
+      - run: bash scripts/production-compose-smoke.sh
