@@ -31,12 +31,25 @@ docker compose -f "$COMPOSE_FILE" config --quiet
 docker compose -f "$COMPOSE_FILE" up --detach --wait --wait-timeout 180
 
 base_url="http://127.0.0.1:${RECEIPT_REPORT_PORT:-3000}"
+wait_for_services() {
+  for _ in $(seq 1 90); do
+    if curl --fail --silent "$base_url/api/v1/health" >/dev/null 2>&1 &&
+      docker compose -f "$COMPOSE_FILE" exec --no-TTY worker \
+        test -f /tmp/receipt-report-worker.ready; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "API and worker did not become ready" >&2
+  return 1
+}
 receipt_id="$(node scripts/compose-normalization-smoke.mjs "$base_url")"
 docker compose -f "$COMPOSE_FILE" restart api worker
-docker compose -f "$COMPOSE_FILE" up --detach --wait --wait-timeout 180
+wait_for_services
 node scripts/compose-normalization-smoke.mjs "$base_url" verify "$receipt_id"
 
 archive="$(scripts/backup-compose.sh "$temporary")"
+wait_for_services
 curl --fail --silent --show-error -X POST -H 'content-type: application/json' \
   --data '{"merchantRaw":"Post-backup sentinel","purchaseDate":"2026-07-22","totalCents":99}' \
   "$base_url/api/v1/receipts" >/dev/null
