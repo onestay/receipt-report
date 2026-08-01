@@ -31,11 +31,14 @@ Validate before startup:
 
 ```bash
 docker compose --env-file .env.production -f compose.production.yaml config --quiet
-docker compose --env-file .env.production -f compose.production.yaml pull
 docker compose --env-file .env.production -f compose.production.yaml up --detach --wait
 curl --fail http://127.0.0.1:3000/api/v1/health
 curl --fail http://127.0.0.1:3000/api/v1/operator/status | jq
 ```
+
+The commands above use the locally built tags. Run `docker compose ... pull`
+before `up` only when the selected immutable images actually exist in a
+registry.
 
 The migration container must finish before API and worker start. A failed
 `migrate` service identifies schema/database/volume ownership errors; an
