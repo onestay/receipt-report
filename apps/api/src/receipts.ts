@@ -298,11 +298,19 @@ export class ReceiptRepository {
         ],
       },
       orderBy: [{ purchaseDate: "desc" }, { id: "desc" }],
-      ...(query.provenance || query.category === "unallocated-adjustment"
+      ...(query.provenance ||
+      query.workflow ||
+      query.category === "unallocated-adjustment"
         ? {}
         : { take: query.limit + 1 }),
       include: {
         ...merchantInclude,
+        document: {
+          include: {
+            extractionJobs: { orderBy: { createdAt: "desc" }, take: 1 },
+            extractionProposals: { where: { status: "pending" }, take: 1 },
+          },
+        },
         lineItems: { select: { lineTotalCents: true } },
         extractionProposals: { select: { status: true } },
         _count: { select: { lineItems: true } },
@@ -318,7 +326,7 @@ export class ReceiptRepository {
               ) !== record.totalCents,
           )
         : records;
-    const classified = query.provenance
+    const provenanceFiltered = query.provenance
       ? matching.filter((record) => {
           const approved = record.extractionProposals.filter(
             (item) => item.status === "approved",
@@ -332,6 +340,30 @@ export class ReceiptRepository {
           return value === query.provenance;
         })
       : matching;
+    const classified = query.workflow
+      ? provenanceFiltered.filter((record) => {
+          const document = record.document;
+          if (!document) return false;
+          if (document.normalizationStatus === "failed")
+            return query.workflow === "failed";
+          if (
+            document.normalizationStatus === "pending" ||
+            document.normalizationStatus === "running"
+          )
+            return query.workflow === "preparing";
+          const job = document.extractionJobs[0];
+          if (!job) return false;
+          if (job.status === "pending" || job.status === "retry_wait")
+            return query.workflow === "queued";
+          if (job.status === "running") return query.workflow === "processing";
+          if (job.status === "failed") return query.workflow === "failed";
+          return (
+            job.status === "succeeded" &&
+            document.extractionProposals.length > 0 &&
+            query.workflow === "needs-review"
+          );
+        })
+      : provenanceFiltered;
     const hasMore = classified.length > query.limit;
     const page = classified.slice(0, query.limit);
     const last = page.at(-1);

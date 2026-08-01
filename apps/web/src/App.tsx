@@ -37,9 +37,17 @@ import {
   uploadReceiptDocument,
 } from "./DocumentPanel.js";
 import { AIReviewPanel, ReceiptLifecycleBadge } from "./AIReviewPanel.js";
+import { Insights } from "./Insights.js";
 
 type Route = {
-  page: "list" | "new" | "detail" | "categories" | "category-rules" | "quality";
+  page:
+    | "list"
+    | "new"
+    | "detail"
+    | "categories"
+    | "category-rules"
+    | "quality"
+    | "insights";
   id?: string;
 };
 const money = new Intl.NumberFormat("de-DE", {
@@ -54,6 +62,7 @@ function route(): Route {
   if (location.pathname === "/category-rules")
     return { page: "category-rules" };
   if (location.pathname === "/extraction-quality") return { page: "quality" };
+  if (location.pathname === "/insights") return { page: "insights" };
   if (location.pathname === "/receipts/new") return { page: "new" };
   const match = location.pathname.match(/^\/receipts\/([^/]+)$/);
   return match?.[1] ? { page: "detail", id: match[1] } : { page: "list" };
@@ -111,7 +120,7 @@ export function App() {
     return () => window.removeEventListener("popstate", update);
   }, []);
   useEffect(() => {
-    document.title = `${current.page === "list" ? "Ledger" : current.page === "new" ? "New receipt" : current.page === "categories" ? "Categories" : current.page === "category-rules" ? "Category rules" : "Receipt detail"} · Receipt Report`;
+    document.title = `${current.page === "list" ? "Ledger" : current.page === "new" ? "New receipt" : current.page === "categories" ? "Categories" : current.page === "category-rules" ? "Category rules" : current.page === "quality" ? "AI quality" : current.page === "insights" ? "Spending insights" : "Receipt detail"} · Receipt Report`;
     const main = document.querySelector("main");
     const heading = document.querySelector<HTMLElement>("main h1");
     if (heading && !main?.contains(document.activeElement)) {
@@ -131,6 +140,7 @@ export function App() {
         </Link>
         <nav aria-label="Primary">
           <Link href="/receipts">Ledger</Link>
+          <Link href="/insights">Insights</Link>
           <Link href="/categories">Categories</Link>
           <Link href="/category-rules">Rules</Link>
           <Link href="/extraction-quality">AI quality</Link>
@@ -140,7 +150,7 @@ export function App() {
         </nav>
       </header>
       <main className="page">
-        {current.page === "list" && <ReceiptList />}
+        {current.page === "list" && <ReceiptList key={location.search} />}
         {current.page === "new" && <CreateReceipt />}
         {current.page === "detail" && current.id && (
           <ReceiptEditor id={current.id} />
@@ -148,6 +158,7 @@ export function App() {
         {current.page === "categories" && <CategoryManager />}
         {current.page === "category-rules" && <CategorySuggestionRuleManager />}
         {current.page === "quality" && <ExtractionQuality />}
+        {current.page === "insights" && <Insights />}
       </main>
       <footer>Quietly kept on your own server.</footer>
     </div>
@@ -293,6 +304,9 @@ export function formatDate(value: string) {
 }
 
 function ReceiptList() {
+  const filters = new URLSearchParams(location.search);
+  filters.delete("cursor");
+  const filtered = filters.size > 0;
   const [receipts, setReceipts] = useState<ReceiptSummary[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [state, setState] = useState<
@@ -301,8 +315,11 @@ function ReceiptList() {
   const load = useCallback(async (next?: string) => {
     setState("loading");
     try {
+      const parameters = new URLSearchParams(location.search);
+      if (next) parameters.set("cursor", next);
+      else parameters.delete("cursor");
       const response = await fetch(
-        `/api/v1/receipts${next ? `?cursor=${encodeURIComponent(next)}` : ""}`,
+        `/api/v1/receipts${parameters.size ? `?${parameters}` : ""}`,
       );
       if (!response.ok) throw new Error(String(response.status));
       const result = receiptListSchema.parse(await response.json());
@@ -342,8 +359,18 @@ function ReceiptList() {
       </section>
       <section aria-labelledby="ledger-title">
         <div className="section-heading">
-          <h2 id="ledger-title">Recent receipts</h2>
-          <span>{receipts.length} entries</span>
+          <h2 id="ledger-title">
+            {filtered ? "Matching receipts" : "Recent receipts"}
+          </h2>
+          <span>
+            {receipts.length} entries
+            {filtered && (
+              <>
+                {" "}
+                · <Link href="/receipts">Clear filters</Link>
+              </>
+            )}
+          </span>
         </div>
         {state === "loading" && receipts.length === 0 && (
           <div className="panel state" role="status">

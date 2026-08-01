@@ -518,6 +518,9 @@ export const receiptListQuerySchema = z.object({
   merchantStore: z.literal("unassigned").optional(),
   merchantQuery: z.string().trim().min(1).max(200).optional(),
   provenance: spendingProvenanceSchema.optional(),
+  workflow: z
+    .enum(["preparing", "queued", "processing", "needs-review", "failed"])
+    .optional(),
 });
 
 export const apiErrorCodeSchema = z.enum([

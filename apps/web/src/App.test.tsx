@@ -150,6 +150,29 @@ describe("application shell", () => {
     expect(formatDate("2026-07-19")).toBe("19.07.2026");
   });
 
+  it("refetches the ledger when same-page filters are cleared", async () => {
+    history.replaceState({}, "", "/receipts?workflow=failed");
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ receipts: [], nextCursor: null }), {
+          status: 200,
+        }),
+      ),
+    );
+    stubAppFetch(fetchMock);
+    render(<App />);
+    expect(
+      await screen.findByRole("heading", { name: "Matching receipts" }),
+    ).toBeVisible();
+    fireEvent.click(screen.getByRole("link", { name: "Clear filters" }));
+    expect(
+      await screen.findByRole("heading", { name: "Recent receipts" }),
+    ).toBeVisible();
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/v1/receipts", undefined),
+    );
+  });
+
   it("distinguishes an unavailable API", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("offline")));
     render(<App />);
