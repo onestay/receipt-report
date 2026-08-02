@@ -187,6 +187,17 @@ otherwise.
 | `EXTRACTION_RETRY_JITTER_PERCENT` | worker      | `20`                             | Random retry jitter from 0–100 percent.                                                                                                    |
 | `EXTRACTION_RAW_RETENTION_MS`     | worker      | `604800000`                      | Retention period for raw provider output (seven days); audit metadata and validated proposals remain durable.                              |
 
+### Structured logging
+
+See [operational logging](docs/logging.md) for correlation fields, privacy
+boundaries, Docker/jq queries, and investigation playbooks.
+
+| Variable                        | Used by     | Default | Purpose                                                                                                                              |
+| ------------------------------- | ----------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `LOG_LEVEL`                     | API, worker | `info`  | Minimum JSON log level: `trace`, `debug`, `info`, `warn`, `error`, or `fatal`.                                                       |
+| `LOG_SENSITIVE_PROVIDER_ERRORS` | worker      | `false` | Explicitly permits a capped 16 KiB non-2xx provider error body in console logs. This may contain sensitive provider or receipt data. |
+| `LOG_SLOW_OPERATION_MS`         | API, worker | `1000`  | Positive duration threshold for slow database, storage, and provider-operation warnings.                                             |
+
 ### Production Compose selection
 
 These variables are consumed by `compose.production.yaml`, not parsed by the

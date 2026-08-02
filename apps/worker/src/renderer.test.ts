@@ -5,6 +5,7 @@ import sharp from "sharp";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseWorkerConfig, type WorkerConfig } from "@receipt-report/config";
 import { FilesystemDocumentStorage } from "@receipt-report/database";
+import type { Logger } from "@receipt-report/logging";
 import {
   LocalDocumentRenderer,
   RendererFailure,
@@ -231,23 +232,34 @@ describe("local renderer", () => {
   });
 
   it("sanitizes failed native commands", async () => {
-    const consoleError = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
-    try {
-      await expect(
-        runLimitedCommand("definitely-not-a-command", [], {
+    const error = vi.fn();
+    const logger = {
+      trace: vi.fn(),
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error,
+      fatal: vi.fn(),
+      child: vi.fn(),
+    } as unknown as Logger;
+    await expect(
+      runLimitedCommand(
+        "definitely-not-a-command",
+        [],
+        {
           timeoutMs: 1000,
           maxBuffer: 1024,
           memoryMb: 64,
-        }),
-      ).rejects.toMatchObject({ code: "renderer_failed" });
-      expect(consoleError).toHaveBeenCalledWith(
-        "Document renderer command failed",
-        expect.objectContaining({ command: "definitely-not-a-command" }),
-      );
-    } finally {
-      consoleError.mockRestore();
-    }
+        },
+        logger,
+      ),
+    ).rejects.toMatchObject({ code: "renderer_failed" });
+    expect(error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "normalization.renderer.command_failed",
+        executable: "definitely-not-a-command",
+      }),
+      "Document renderer command failed",
+    );
   });
 });

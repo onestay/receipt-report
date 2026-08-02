@@ -1,5 +1,5 @@
 {
-  "name": "@receipt-report/receipt-ai",
+  "name": "@receipt-report/logging",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -14,8 +14,6 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@receipt-report/contracts": "workspace:*",
-    "@receipt-report/logging": "workspace:*",
-    "zod": "4.4.3"
+    "pino": "10.1.0"
   }
 }

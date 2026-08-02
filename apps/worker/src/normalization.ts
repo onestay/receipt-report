@@ -11,6 +11,7 @@ import {
   RendererFailure,
   type RenderedDocument,
 } from "./renderer.js";
+import { safeError, silentLogger, type Logger } from "@receipt-report/logging";
 
 type ClaimedJob = {
   id: string;
@@ -29,6 +30,7 @@ export class NormalizationProcessor {
     private readonly storage: FilesystemDocumentStorage,
     private readonly renderer: DocumentRenderer,
     private readonly config: WorkerConfig & ReceiptAiConfig,
+    private readonly logger: Logger = silentLogger,
   ) {}
 
   async resetInterruptedJobs(): Promise<void> {
@@ -44,6 +46,7 @@ export class NormalizationProcessor {
     });
     if (interrupted.length === 0) return;
     await this.database.$transaction(async (transaction) => {
+      let recovered = 0;
       for (const job of interrupted) {
         const reset = await transaction.normalizationJob.updateMany({
           where: {
@@ -60,7 +63,8 @@ export class NormalizationProcessor {
             lastError: null,
           },
         });
-        if (reset.count === 1)
+        if (reset.count === 1) {
+          recovered++;
           await transaction.receiptDocument.update({
             where: { id: job.documentId },
             data: {
@@ -69,7 +73,13 @@ export class NormalizationProcessor {
               normalizationStartedAt: null,
             },
           });
+        }
       }
+      if (recovered > 0)
+        this.logger.warn(
+          { event: "normalization.recovery.completed", count: recovered },
+          "Interrupted normalization jobs recovered",
+        );
     });
   }
 
@@ -116,14 +126,74 @@ export class NormalizationProcessor {
     await this.resetInterruptedJobs();
     const job = await this.claim();
     if (!job) return false;
+    const started = performance.now();
+    let failureOperation = "render";
+    this.logger.info(
+      {
+        event: "normalization.job.claimed",
+        job_id: job.id,
+        document_id: job.documentId,
+        attempt_number: job.attempts,
+      },
+      "Normalization job claimed",
+    );
     try {
+      this.logger.info(
+        {
+          event: "normalization.render.started",
+          job_id: job.id,
+          document_id: job.documentId,
+        },
+        "Document rendering started",
+      );
       const rendered = await this.renderer.render(job.document);
       this.validateRenderedPages(rendered);
+      this.logger.info(
+        {
+          event: "normalization.render.succeeded",
+          job_id: job.id,
+          document_id: job.documentId,
+          renderer: rendered.renderer,
+          page_count: rendered.pages.length,
+          aggregate_bytes: rendered.pages.reduce(
+            (sum, page) => sum + page.byteSize,
+            0,
+          ),
+          aggregate_pixels: rendered.pages.reduce(
+            (sum, page) => sum + page.width * page.height,
+            0,
+          ),
+          duration_ms: Math.round(performance.now() - started),
+        },
+        "Document rendering succeeded",
+      );
+      failureOperation = "publish_database";
       await this.publish(job, rendered);
+      this.logger.info(
+        {
+          event: "normalization.job.published",
+          job_id: job.id,
+          document_id: job.documentId,
+          duration_ms: Math.round(performance.now() - started),
+        },
+        "Normalization published",
+      );
     } catch (error) {
       const code =
         error instanceof RendererFailure ? error.code : "normalization_failed";
       await this.fail(job, code);
+      this.logger.error(
+        {
+          event: "normalization.job.failed",
+          job_id: job.id,
+          document_id: job.documentId,
+          failure_code: code,
+          operation: failureOperation,
+          ...safeError(error),
+          duration_ms: Math.round(performance.now() - started),
+        },
+        "Normalization failed",
+      );
     }
     return true;
   }
@@ -158,13 +228,68 @@ export class NormalizationProcessor {
   }
 
   private async cleanup(relativePath: string): Promise<void> {
+    const started = performance.now();
     try {
       await this.storage.cleanup(relativePath);
+      this.logSlowStorage("cleanup", undefined, started);
       await this.database.documentFileCleanup.deleteMany({
         where: { relativePath },
       });
-    } catch {
+    } catch (error) {
+      this.logger.error(
+        {
+          event: "storage.operation.failed",
+          operation: "cleanup",
+          duration_ms: Math.round(performance.now() - started),
+          ...safeError(error),
+        },
+        "Storage cleanup failed",
+      );
       await this.recordCleanup(relativePath);
+    }
+  }
+
+  private logSlowStorage(
+    operation: "stage" | "promote" | "cleanup",
+    job: ClaimedJob | undefined,
+    started: number,
+  ): void {
+    const duration = Math.round(performance.now() - started);
+    if (duration < this.config.LOG_SLOW_OPERATION_MS) return;
+    this.logger.warn(
+      {
+        event: "storage.operation.slow",
+        operation,
+        ...(job ? { job_id: job.id, document_id: job.documentId } : {}),
+        duration_ms: duration,
+      },
+      "Storage operation was slow",
+    );
+  }
+
+  private async storageOperation<T>(
+    operation: "stage" | "promote",
+    job: ClaimedJob,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    const started = performance.now();
+    try {
+      const result = await run();
+      this.logSlowStorage(operation, job, started);
+      return result;
+    } catch (error) {
+      this.logger.error(
+        {
+          event: "storage.operation.failed",
+          operation,
+          job_id: job.id,
+          document_id: job.documentId,
+          duration_ms: Math.round(performance.now() - started),
+          ...safeError(error),
+        },
+        "Storage operation failed",
+      );
+      throw error;
     }
   }
 
@@ -179,7 +304,11 @@ export class NormalizationProcessor {
     );
     try {
       for (const page of rendered.pages)
-        staged.push(await this.storage.stage(page.bytes, "worker"));
+        staged.push(
+          await this.storageOperation("stage", job, () =>
+            this.storage.stage(page.bytes, "worker"),
+          ),
+        );
       await this.database.$transaction(async (transaction) => {
         for (const relativePath of targets)
           await transaction.documentFileCleanup.upsert({
@@ -189,7 +318,9 @@ export class NormalizationProcessor {
           });
       });
       for (let index = 0; index < staged.length; index += 1)
-        await this.storage.promote(staged[index] ?? "", targets[index] ?? "");
+        await this.storageOperation("promote", job, () =>
+          this.storage.promote(staged[index] ?? "", targets[index] ?? ""),
+        );
 
       const oldPaths = await this.database.$transaction(async (transaction) => {
         const active = await transaction.normalizationJob.findFirst({

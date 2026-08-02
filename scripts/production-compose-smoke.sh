@@ -43,7 +43,34 @@ wait_for_services() {
   echo "API and worker did not become ready" >&2
   return 1
 }
+
+assert_json_logs() {
+  local service="$1"
+  local expected_event="$2"
+  local logs="$temporary/$service.logs"
+  docker compose -f "$COMPOSE_FILE" logs --no-color --no-log-prefix "$service" > "$logs"
+  node --input-type=module - "$logs" "$expected_event" <<'NODE'
+import { readFileSync } from "node:fs";
+const [path, expected] = process.argv.slice(2);
+const marker = "COMPOSE_SECRET_MARKER";
+const text = readFileSync(path, "utf8");
+if (text.includes(marker)) throw new Error(`sensitive marker leaked in ${path}`);
+const lines = text.split("\n").filter(Boolean);
+const parsed = lines.map((line) => JSON.parse(line));
+if (!parsed.some((entry) => entry.event === expected))
+  throw new Error(`missing ${expected} in ${path}`);
+for (const entry of parsed) {
+  if (!entry.time || !entry.level || !entry.service || !entry.event)
+    throw new Error(`invalid structured log in ${path}`);
+}
+NODE
+}
 receipt_id="$(node scripts/compose-normalization-smoke.mjs "$base_url")"
+curl --silent --output /dev/null -X POST -H 'content-type: application/json' \
+  --data '{"merchantRaw":"COMPOSE_SECRET_MARKER"}' \
+  "$base_url/api/v1/receipts"
+assert_json_logs api "api.request.completed"
+assert_json_logs worker "normalization.job.published"
 docker compose -f "$COMPOSE_FILE" restart api worker
 wait_for_services
 node scripts/compose-normalization-smoke.mjs "$base_url" verify "$receipt_id"

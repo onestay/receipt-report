@@ -1,5 +1,6 @@
 import { createServer, type Server } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Logger } from "@receipt-report/logging";
 import {
   EXTRACTION_SCHEMA_VERSION,
   GERMAN_RECEIPT_PROFILE_VERSION,
@@ -284,6 +285,23 @@ function adapter(baseUrl: string, overrides = {}) {
 }
 
 describe("OpenAI-compatible adapter", () => {
+  function captureLogger() {
+    const events: Record<string, unknown>[] = [];
+    const write = (context: unknown) => {
+      if (context && typeof context === "object")
+        events.push(context as Record<string, unknown>);
+    };
+    const logger = {
+      trace: vi.fn(write),
+      debug: vi.fn(write),
+      info: vi.fn(write),
+      warn: vi.fn(write),
+      error: vi.fn(write),
+      fatal: vi.fn(write),
+      child: vi.fn(),
+    } as unknown as Logger;
+    return { events, logger };
+  }
   it("accepts only future, bounded-representable Retry-After values", () => {
     const now = Date.parse("2026-07-31T12:00:00.000Z");
     expect(parseRetryAfterMs("5", now)).toBe(5000);
@@ -487,6 +505,47 @@ describe("OpenAI-compatible adapter", () => {
       retryable,
       message: `Receipt extraction failed: ${kind}`,
     });
+  });
+
+  it("retains bounded non-2xx text and logs it only under explicit opt-in", async () => {
+    const marker = "SENSITIVE_PROVIDER_MARKER";
+    const safe = captureLogger();
+    const safeUrl = await fakeProvider(() => ({ status: 500, body: marker }));
+    const correlatedRequest = {
+      ...request,
+      jobId: "job-1",
+      attemptId: "attempt-1",
+    };
+    const safeError = await adapter(safeUrl, { logger: safe.logger })
+      .extract(correlatedRequest)
+      .catch((error: unknown) => error);
+    expect(safeError).toMatchObject({ rawProviderOutput: marker });
+    expect(JSON.stringify(safe.events)).not.toContain(marker);
+    expect(safe.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: "provider.request.completed",
+          document_id: request.documentId,
+          job_id: "job-1",
+          attempt_id: "attempt-1",
+        }),
+      ]),
+    );
+
+    await new Promise<void>((resolve) => server?.close(() => resolve()));
+    server = undefined;
+    const sensitive = captureLogger();
+    const sensitiveUrl = await fakeProvider(() => ({
+      status: 500,
+      body: marker,
+    }));
+    await adapter(sensitiveUrl, {
+      logger: sensitive.logger,
+      logSensitiveProviderErrors: true,
+    })
+      .extract(request)
+      .catch(() => undefined);
+    expect(JSON.stringify(sensitive.events)).toContain(marker);
   });
 
   it.each([

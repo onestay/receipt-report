@@ -11,6 +11,7 @@ import {
   type Database,
 } from "@receipt-report/database";
 import { createApp } from "./app.js";
+import type { Logger } from "@receipt-report/logging";
 
 let database: Database | undefined;
 let directory: string | undefined;
@@ -23,6 +24,37 @@ afterEach(async () => {
 });
 
 describe("API", () => {
+  it("returns validated request IDs and keeps successful health logs at debug", async () => {
+    const logger = {
+      trace: vi.fn(),
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      fatal: vi.fn(),
+      child: vi.fn(),
+    } as unknown as Logger;
+    const app = createApp({ logger });
+    const valid = await request(app)
+      .get("/api/v1/health")
+      .set("X-Request-ID", "safe_request-1")
+      .expect(200);
+    expect(valid.headers["x-request-id"]).toBe("safe_request-1");
+    expect(logger.debug).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "api.request.completed",
+        request_id: "safe_request-1",
+        route: "/api/v1/health",
+      }),
+      "API request completed",
+    );
+    expect(logger.info).not.toHaveBeenCalled();
+    const replaced = await request(app)
+      .get("/api/v1/health")
+      .set("X-Request-ID", "invalid/secret?query")
+      .expect(200);
+    expect(replaced.headers["x-request-id"]).toMatch(/^[a-f0-9-]{36}$/);
+  });
   it("returns the shared liveness contract without a database", async () => {
     const response = await request(createApp())
       .get("/api/v1/health")
@@ -198,18 +230,33 @@ describe("API", () => {
     const failingDatabase = {
       receipt: { findMany: async () => Promise.reject(failure) },
     } as unknown as Database;
-    const consoleError = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
-    const response = await request(createApp({ database: failingDatabase }))
+    const error = vi.fn();
+    const logger = {
+      trace: vi.fn(),
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error,
+      fatal: vi.fn(),
+      child: vi.fn(),
+    } as unknown as Logger;
+    const response = await request(
+      createApp({ database: failingDatabase, logger }),
+    )
       .get("/api/v1/receipts")
       .expect(500);
     expect(response.body).toEqual({
       error: { code: "internal_error", message: "Unexpected server error" },
     });
     expect(JSON.stringify(response.body)).not.toContain("private");
-    expect(consoleError).toHaveBeenCalledWith("Unexpected API error");
-    consoleError.mockRestore();
+    expect(error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "api.request.unexpected_error",
+        error_class: "Error",
+      }),
+      "Unexpected API error",
+    );
+    expect(JSON.stringify(error.mock.calls)).not.toContain("private");
   });
 
   it("paginates equal-date receipts without duplicates", async () => {

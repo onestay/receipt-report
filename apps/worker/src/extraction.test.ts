@@ -24,6 +24,7 @@ import {
   type ReceiptExtractor,
 } from "@receipt-report/receipt-ai";
 import { ExtractionProcessor } from "./extraction.js";
+import type { Logger } from "@receipt-report/logging";
 
 let directory = "";
 let database: Database;
@@ -138,7 +139,11 @@ async function seed(options: { revision?: string; createJob?: boolean } = {}) {
   return { receipt, document, pages, job };
 }
 
-function processor(extractor: ReceiptExtractor, random = () => 0.5) {
+function processor(
+  extractor: ReceiptExtractor,
+  random = () => 0.5,
+  logger?: Logger,
+) {
   return new ExtractionProcessor(
     database,
     storage,
@@ -146,7 +151,25 @@ function processor(extractor: ReceiptExtractor, random = () => 0.5) {
     config,
     () => new Date(nowMs),
     random,
+    logger,
   );
+}
+
+function captureLogger() {
+  const events: Record<string, unknown>[] = [];
+  const write = (fields: Record<string, unknown>) => events.push(fields);
+  const logger = {
+    trace: write,
+    debug: write,
+    info: write,
+    warn: write,
+    error: write,
+    fatal: write,
+    child() {
+      return this;
+    },
+  } as unknown as Logger;
+  return { events, logger };
 }
 
 function requireJob<T>(job: T | null): T {
@@ -159,11 +182,18 @@ describe("extraction processor", () => {
     const { document, job } = await seed();
     const storedJob = requireJob(job);
     const extract = vi.fn(createDeterministicFakeReceiptExtractor().extract);
+    const captured = captureLogger();
     await expect(
-      processor({ name: "fake", extract }).processNext(),
+      processor(
+        { name: "fake", extract },
+        undefined,
+        captured.logger,
+      ).processNext(),
     ).resolves.toBe(true);
     expect(extract).toHaveBeenCalledWith({
       documentId: document.id,
+      jobId: storedJob.id,
+      attemptId: expect.any(String),
       categoryOptions: expect.any(Array),
       pages: [
         expect.objectContaining({ position: 0, bytes: new Uint8Array([1]) }),
@@ -185,6 +215,23 @@ describe("extraction processor", () => {
     expect(JSON.parse(attempt.validatedOutput ?? "{}")).toMatchObject({
       schemaVersion: "receipt-extraction-v2",
     });
+    expect(captured.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: "extraction.attempt.started",
+          job_id: storedJob.id,
+          document_id: document.id,
+        }),
+        expect.objectContaining({
+          event: "extraction.attempt.published",
+          job_id: storedJob.id,
+          document_id: document.id,
+        }),
+      ]),
+    );
+    expect(JSON.stringify(captured.events)).not.toContain(
+      "Synthetic extraction",
+    );
     const proposal = await database.extractionProposal.findFirstOrThrow({
       include: { findings: true },
     });

@@ -29,3 +29,13 @@ docker compose --project-name "$project_name" restart api worker
 docker compose --project-name "$project_name" up --detach --wait --wait-timeout 180
 node scripts/compose-normalization-smoke.mjs \
   "http://127.0.0.1:${RECEIPT_REPORT_PORT:-3000}" verify "$smoke_receipt_id"
+for service in api worker; do
+  docker compose --project-name "$project_name" logs --no-color --no-log-prefix "$service" |
+    node --input-type=module -e '
+      let text = "";
+      process.stdin.on("data", chunk => text += chunk);
+      process.stdin.on("end", () => {
+        const entries = text.split("\n").filter(Boolean).map(line => JSON.parse(line));
+        if (!entries.length || entries.some(entry => !entry.time || !entry.level || !entry.service || !entry.event)) process.exit(1);
+      });'
+done

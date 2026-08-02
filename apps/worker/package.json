@@ -13,6 +13,7 @@
     "@receipt-report/config": "workspace:*",
     "@receipt-report/contracts": "workspace:*",
     "@receipt-report/database": "workspace:*",
+    "@receipt-report/logging": "workspace:*",
     "@receipt-report/receipt-ai": "workspace:*",
     "sharp": "0.34.5"
   }

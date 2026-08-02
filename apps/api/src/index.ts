@@ -1,9 +1,18 @@
 import { startServer } from "./server.js";
+import { createLogger, safeUnexpectedError } from "@receipt-report/logging";
+
+const bootstrapLogger = createLogger({
+  service: "receipt-report-api",
+  level: "info",
+});
 
 void startServer()
   .then(({ stop }) => {
     const shutdown = async (signal: string) => {
-      console.log(`receipt-report-api received ${signal}`);
+      bootstrapLogger.info(
+        { event: "api.shutdown.signal", signal },
+        "Shutdown signal received",
+      );
       await stop();
       process.exit(0);
     };
@@ -11,6 +20,13 @@ void startServer()
     process.once("SIGTERM", () => void shutdown("SIGTERM"));
   })
   .catch((error: unknown) => {
-    console.error(error);
+    bootstrapLogger.fatal(
+      {
+        event: "api.startup.failed",
+        stage: "startup",
+        ...safeUnexpectedError(error),
+      },
+      "API startup failed",
+    );
     process.exitCode = 1;
   });

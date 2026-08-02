@@ -37,6 +37,13 @@ import type {
 } from "@receipt-report/database";
 import { ZodError } from "zod";
 import {
+  requestId,
+  safeError,
+  safeUnexpectedError,
+  silentLogger,
+  type Logger,
+} from "@receipt-report/logging";
+import {
   ConflictError,
   DocumentRequestError,
   DuplicateDocumentError,
@@ -75,12 +82,44 @@ export type AppOptions = {
     profileVersion: ReceiptAiConfig["EXTRACTION_PROFILE_VERSION"];
   };
   operatorStaleAfterMs?: number;
+  logger?: Logger;
 };
 
 export function createApp(options: AppOptions = {}): Express {
   const app = express();
+  const logger = options.logger ?? silentLogger;
 
   app.disable("x-powered-by");
+  app.use((request, response, next) => {
+    const selected = requestId(request.header("X-Request-ID"));
+    response.locals.requestId = selected;
+    response.setHeader("X-Request-ID", selected);
+    const started = performance.now();
+    response.once("finish", () => {
+      const context = {
+        event: "api.request.completed",
+        request_id: selected,
+        method: request.method,
+        route:
+          typeof request.route?.path === "string"
+            ? request.route.path
+            : "unmatched",
+        status: response.statusCode,
+        duration_ms: Math.round(performance.now() - started),
+      };
+      const quietSuccess =
+        response.statusCode < 400 &&
+        request.method === "GET" &&
+        ["/api/v1/health", "/api/v1/operator/status"].includes(
+          typeof request.route?.path === "string" ? request.route.path : "",
+        );
+      if (quietSuccess) logger.debug(context, "API request completed");
+      else if (response.statusCode >= 500)
+        logger.error(context, "API request failed");
+      else logger.info(context, "API request completed");
+    });
+    next();
+  });
   app.use(express.json({ limit: "1mb" }));
   app.get("/api/v1/health", (_request, response) => {
     response.json(
@@ -749,7 +788,7 @@ export function createApp(options: AppOptions = {}): Express {
   );
   const errorHandler: ErrorRequestHandler = (
     error,
-    _request,
+    request,
     response,
     _next,
   ) => {
@@ -758,6 +797,22 @@ export function createApp(options: AppOptions = {}): Express {
       return;
     }
     if (error instanceof ZodError || error instanceof SyntaxError) {
+      logger.warn(
+        {
+          event: "api.request.validation_failed",
+          request_id: response.locals.requestId,
+          validation_stage: "request",
+          issue_count: error instanceof ZodError ? error.issues.length : 1,
+          issues:
+            error instanceof ZodError
+              ? error.issues.map((issue) => ({
+                  path: issue.path.join("."),
+                  code: issue.code,
+                }))
+              : [{ path: "body", code: "invalid_json" }],
+        },
+        "Request validation failed",
+      );
       response
         .status(400)
         .json(apiError("validation_error", "Request validation failed"));
@@ -802,9 +857,30 @@ export function createApp(options: AppOptions = {}): Express {
     }
     const databaseErrorCode = prismaErrorCode(error);
     if (databaseErrorCode) {
-      console.error("Receipt database operation failed", databaseErrorCode);
+      logger.error(
+        {
+          event: "api.database.failed",
+          request_id: response.locals.requestId,
+          error_code: databaseErrorCode,
+          operation: "request",
+        },
+        "Receipt database operation failed",
+      );
     } else {
-      console.error("Unexpected API error");
+      logger.error(
+        {
+          event: "api.request.unexpected_error",
+          request_id: response.locals.requestId,
+          method: request.method,
+          route:
+            typeof request.route?.path === "string"
+              ? request.route.path
+              : "unmatched",
+          ...safeError(error),
+          ...safeUnexpectedError(error),
+        },
+        "Unexpected API error",
+      );
     }
     response
       .status(500)

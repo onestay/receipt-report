@@ -49,7 +49,7 @@ describe("worker process", () => {
       );
       child.stdout.on("data", (chunk: Buffer) => {
         const output = chunk.toString();
-        if (output.includes("receipt-report-worker ready")) {
+        if (output.includes('"event":"worker.ready"')) {
           clearTimeout(timeout);
           resolveReady(output);
         }

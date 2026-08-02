@@ -18,6 +18,7 @@ import {
 } from "@receipt-report/database";
 import { NormalizationProcessor } from "./normalization.js";
 import { RendererFailure, type DocumentRenderer } from "./renderer.js";
+import type { Logger } from "@receipt-report/logging";
 
 let directory = "";
 let database: Database;
@@ -113,6 +114,23 @@ async function retry(documentId: string) {
   ]);
 }
 
+function captureLogger() {
+  const events: Record<string, unknown>[] = [];
+  const write = (fields: Record<string, unknown>) => events.push(fields);
+  const logger = {
+    trace: write,
+    debug: write,
+    info: write,
+    warn: write,
+    error: write,
+    fatal: write,
+    child() {
+      return this;
+    },
+  } as unknown as Logger;
+  return { events, logger };
+}
+
 describe("normalization processor", () => {
   it("publishes an ordered complete set and retries idempotently", async () => {
     const { document } = await seed();
@@ -122,11 +140,13 @@ describe("normalization processor", () => {
         renderer: "synthetic/1",
       })),
     };
+    const captured = captureLogger();
     const processor = new NormalizationProcessor(
       database,
       storage,
       renderer,
       config,
+      captured.logger,
     );
     await expect(processor.processNext()).resolves.toBe(true);
     const first = await database.receiptDocument.findUniqueOrThrow({
@@ -141,6 +161,19 @@ describe("normalization processor", () => {
     expect(first.pages.map((item) => item.pageNumber)).toEqual([1, 2]);
     expect(first.pages.every((item) => item.totalPages === 2)).toBe(true);
     expect(first.normalizationRevision).toMatch(/^receipt-page-v1-/);
+    expect(captured.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: "normalization.job.claimed",
+          document_id: document.id,
+        }),
+        expect.objectContaining({
+          event: "normalization.job.published",
+          document_id: document.id,
+        }),
+      ]),
+    );
+    expect(JSON.stringify(captured.events)).not.toContain("Synthetic");
     await expect(
       database.extractionJob.findFirstOrThrow({
         where: { documentId: document.id },

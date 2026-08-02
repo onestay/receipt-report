@@ -11,6 +11,16 @@ const safeStoragePath = z.string().superRefine((value, context) => {
 });
 
 const positiveLimit = z.coerce.number().int().positive();
+const loggingSchema = z.object({
+  LOG_LEVEL: z
+    .enum(["trace", "debug", "info", "warn", "error", "fatal"])
+    .default("info"),
+  LOG_SENSITIVE_PROVIDER_ERRORS: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
+  LOG_SLOW_OPERATION_MS: positiveLimit.default(1000),
+});
 const extractionProfileSchema = z.object({
   EXTRACTION_PROFILE_VERSION: z
     .literal("de-receipt-v2")
@@ -72,6 +82,7 @@ const sharedSchema = z
     NORMALIZATION_POLL_MS: positiveLimit.default(500),
     EXTRACTION_MAX_ATTEMPTS: positiveLimit.max(20).default(5),
   })
+  .safeExtend(loggingSchema.shape)
   .superRefine((value, context) => {
     const databasePath = value.DATABASE_URL.slice("file:".length);
     if (resolve(value.STORAGE_PATH) === dirname(resolve(databasePath))) {
