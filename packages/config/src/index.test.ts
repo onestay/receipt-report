@@ -126,6 +126,30 @@ describe("configuration", () => {
     ).toThrow();
   });
 
+  it("validates structured logging configuration", () => {
+    expect(parseApiConfig(shared)).toMatchObject({
+      LOG_LEVEL: "info",
+      LOG_SENSITIVE_PROVIDER_ERRORS: false,
+      LOG_SLOW_OPERATION_MS: 1000,
+    });
+    expect(
+      parseApiConfig({
+        ...shared,
+        LOG_LEVEL: "debug",
+        LOG_SENSITIVE_PROVIDER_ERRORS: "true",
+        LOG_SLOW_OPERATION_MS: "250",
+      }),
+    ).toMatchObject({
+      LOG_LEVEL: "debug",
+      LOG_SENSITIVE_PROVIDER_ERRORS: true,
+      LOG_SLOW_OPERATION_MS: 250,
+    });
+    expect(() => parseApiConfig({ ...shared, LOG_LEVEL: "verbose" })).toThrow();
+    expect(() =>
+      parseApiConfig({ ...shared, LOG_SLOW_OPERATION_MS: "0" }),
+    ).toThrow();
+  });
+
   it("defaults receipt AI to the local deterministic provider", () => {
     expect(parseReceiptAiConfig({})).toEqual({
       EXTRACTION_PROVIDER: "fake",

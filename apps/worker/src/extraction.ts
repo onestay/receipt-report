@@ -15,6 +15,7 @@ import {
   type ProposalFinding,
   type ExtractionCategoryOption,
 } from "@receipt-report/receipt-ai";
+import { silentLogger, type Logger } from "@receipt-report/logging";
 
 type ExtractionProcessorConfig = WorkerConfig & ReceiptAiConfig;
 
@@ -45,6 +46,7 @@ export class ExtractionProcessor {
     private readonly config: ExtractionProcessorConfig,
     private readonly clock: () => Date = () => new Date(),
     private readonly random: () => number = Math.random,
+    private readonly logger: Logger = silentLogger,
   ) {}
 
   private modelName(): string {
@@ -62,6 +64,7 @@ export class ExtractionProcessor {
       },
       select: {
         id: true,
+        documentId: true,
         attempts: true,
         maxAttempts: true,
         claimToken: true,
@@ -89,6 +92,15 @@ export class ExtractionProcessor {
           },
         });
         if (reset.count !== 1) return;
+        this.logger.warn(
+          {
+            event: "extraction.lease.recovered",
+            job_id: job.id,
+            document_id: job.documentId,
+            attempt_number: job.attempts,
+          },
+          "Expired extraction lease recovered",
+        );
         await transaction.extractionAttempt.updateMany({
           where: {
             jobId: job.id,
@@ -122,6 +134,11 @@ export class ExtractionProcessor {
       },
       data: { rawProviderOutput: null, rawPurgedAt: this.clock() },
     });
+    if (purged.count > 0)
+      this.logger.info(
+        { event: "extraction.raw_response.purged", count: purged.count },
+        "Expired raw provider responses purged",
+      );
     return purged.count;
   }
 
@@ -186,6 +203,22 @@ export class ExtractionProcessor {
     const job = await this.claim();
     if (!job) return false;
     const startedAt = this.clock();
+    let failureStage: "storage_read" | "provider" | "proposal_build" =
+      "storage_read";
+    this.logger.info(
+      {
+        event: "extraction.attempt.started",
+        job_id: job.id,
+        attempt_id: job.attemptId,
+        document_id: job.documentId,
+        attempt_number: job.attempts,
+        max_attempts: job.maxAttempts,
+        provider: this.extractor.name,
+        model: this.modelName(),
+        profile: job.extractionProfileVersion,
+      },
+      "Extraction attempt started",
+    );
     try {
       const document = await this.database.receiptDocument.findUnique({
         where: { id: job.documentId },
@@ -223,13 +256,26 @@ export class ExtractionProcessor {
           categoryOptionFingerprint: categoryContext.fingerprint,
         },
       });
+      failureStage = "provider";
       const result = await this.extractor.extract({
         documentId: job.documentId,
         pages,
         categoryOptions: categoryContext.options,
       });
+      failureStage = "proposal_build";
       await this.publish(job, result, startedAt, categoryContext.omitted);
     } catch (error) {
+      if (!(error instanceof ReceiptExtractionError))
+        this.logger.error(
+          {
+            event: "extraction.operation.failed",
+            job_id: job.id,
+            attempt_id: job.attemptId,
+            document_id: job.documentId,
+            failure_stage: failureStage,
+          },
+          "Extraction operation failed",
+        );
       const failure: Failure =
         error instanceof ReceiptExtractionError
           ? {
@@ -371,6 +417,23 @@ export class ExtractionProcessor {
         },
       });
     });
+    this.logger.info(
+      {
+        event: "extraction.attempt.published",
+        job_id: job.id,
+        attempt_id: job.attemptId,
+        document_id: job.documentId,
+        duration_ms: this.duration(startedAt),
+        finding_count: findings.length,
+        finding_codes: [...new Set(findings.map((finding) => finding.code))],
+        finding_severities: [
+          ...new Set(findings.map((finding) => finding.severity)),
+        ],
+        raw_response_retained: true,
+        raw_response_bytes: Buffer.byteLength(result.rawProviderOutput, "utf8"),
+      },
+      "Extraction proposal published",
+    );
   }
 
   private async buildProposal(
@@ -598,6 +661,32 @@ export class ExtractionProcessor {
         },
       });
     });
+    this.logger[shouldRetry ? "warn" : "error"](
+      {
+        event: shouldRetry
+          ? "extraction.retry.scheduled"
+          : "extraction.attempt.failed",
+        job_id: job.id,
+        attempt_id: job.attemptId,
+        document_id: job.documentId,
+        attempt_number: job.attempts,
+        attempts_remaining: Math.max(0, job.maxAttempts - job.attempts),
+        failure_kind: failure.kind,
+        retryable: failure.retryable,
+        ...(shouldRetry
+          ? {
+              retry_delay_ms: availableAt.getTime() - now.getTime(),
+              available_at: availableAt.toISOString(),
+            }
+          : {}),
+        raw_response_retained: failure.rawProviderOutput !== undefined,
+        raw_response_bytes:
+          failure.rawProviderOutput === undefined
+            ? 0
+            : Buffer.byteLength(failure.rawProviderOutput, "utf8"),
+      },
+      shouldRetry ? "Extraction retry scheduled" : "Extraction attempt failed",
+    );
   }
 
   private async cancel(

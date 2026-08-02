@@ -1,5 +1,12 @@
 import { z } from "zod";
 import {
+  safeError,
+  safeProviderOrigin,
+  sensitiveBody,
+  silentLogger,
+  type Logger,
+} from "@receipt-report/logging";
+import {
   euroCentsSchema,
   quantityMilliSchema,
   receiptDateSchema,
@@ -432,6 +439,9 @@ export type OpenAiCompatibleExtractorConfig = {
   maxResponseBytes: number;
   profileVersion: typeof GERMAN_RECEIPT_PROFILE_VERSION;
   fetch?: typeof fetch;
+  logger?: Logger;
+  logSensitiveProviderErrors?: boolean;
+  logSlowOperationMs?: number;
 };
 
 export type ReceiptAiRuntimeConfig = {
@@ -444,6 +454,8 @@ export type ReceiptAiRuntimeConfig = {
   EXTRACTION_MAX_PAGES: number;
   EXTRACTION_MAX_IMAGE_BYTES: number;
   EXTRACTION_MAX_RESPONSE_BYTES: number;
+  LOG_SENSITIVE_PROVIDER_ERRORS?: boolean;
+  LOG_SLOW_OPERATION_MS?: number;
 };
 
 export function parseRetryAfterMs(
@@ -462,17 +474,31 @@ export function parseRetryAfterMs(
   return Number.isSafeInteger(milliseconds) ? milliseconds : undefined;
 }
 
-function classifyStatus(response: Response): ReceiptExtractionError {
+function classifyStatus(
+  response: Response,
+  rawProviderOutput?: string,
+): ReceiptExtractionError {
   const retryAfterMs = parseRetryAfterMs(response.headers.get("retry-after"));
   const { status } = response;
   if (status === 401 || status === 403)
-    return new ReceiptExtractionError("authentication", false);
+    return new ReceiptExtractionError(
+      "authentication",
+      false,
+      undefined,
+      rawProviderOutput,
+    );
   if (status === 429)
-    return new ReceiptExtractionError("rate_limit", true, retryAfterMs);
+    return new ReceiptExtractionError(
+      "rate_limit",
+      true,
+      retryAfterMs,
+      rawProviderOutput,
+    );
   return new ReceiptExtractionError(
     "provider_unavailable",
     status >= 500,
     status >= 500 ? retryAfterMs : undefined,
+    rawProviderOutput,
   );
 }
 
@@ -534,6 +560,8 @@ export function createOpenAiCompatibleReceiptExtractor(
     throw new ReceiptExtractionError("configuration", false);
   }
   const transport = config.fetch ?? fetch;
+  const logger = config.logger ?? silentLogger;
+  const providerOrigin = safeProviderOrigin(config.baseUrl);
   return {
     name: "openai-compatible",
     async extract(input) {
@@ -550,6 +578,18 @@ export function createOpenAiCompatibleReceiptExtractor(
       }
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), config.timeoutMs);
+      const providerStarted = performance.now();
+      logger.info(
+        {
+          event: "provider.request.started",
+          provider_origin: providerOrigin,
+          model: config.model,
+          page_count: request.pages.length,
+          image_bytes: totalBytes,
+          timeout_ms: config.timeoutMs,
+        },
+        "Provider request started",
+      );
       let response: Response;
       try {
         response = await transport(
@@ -602,33 +642,199 @@ export function createOpenAiCompatibleReceiptExtractor(
             signal: controller.signal,
           },
         );
-      } catch {
+      } catch (error) {
         clearTimeout(timeout);
-        if (controller.signal.aborted)
+        if (controller.signal.aborted) {
+          logger.warn(
+            {
+              event: "provider.request.failed",
+              failure_stage: "provider_timeout",
+              failure_kind: "timeout",
+              duration_ms: Math.round(performance.now() - providerStarted),
+            },
+            "Provider request timed out",
+          );
           throw new ReceiptExtractionError("timeout", true);
+        }
+        logger.warn(
+          {
+            event: "provider.request.failed",
+            failure_stage: "provider_transport",
+            failure_kind: "provider_unavailable",
+            ...safeError(
+              error instanceof Error && error.cause instanceof Error
+                ? error.cause
+                : error,
+            ),
+            duration_ms: Math.round(performance.now() - providerStarted),
+          },
+          "Provider transport failed",
+        );
         throw new ReceiptExtractionError("provider_unavailable", true);
       }
       let rawProviderOutput: string | undefined;
       try {
-        if (!response.ok) throw classifyStatus(response);
-        rawProviderOutput = await boundedResponseText(
-          response,
-          config.maxResponseBytes,
+        if (!response.ok) {
+          try {
+            rawProviderOutput = await boundedResponseText(
+              response,
+              config.maxResponseBytes,
+            );
+          } catch {
+            rawProviderOutput = undefined;
+          }
+          const providerRequestId = [
+            "x-request-id",
+            "request-id",
+            "openai-request-id",
+          ]
+            .map((name) => response.headers.get(name))
+            .find(
+              (value) =>
+                value !== null && /^[A-Za-z0-9._-]{1,128}$/.test(value),
+            );
+          logger.warn(
+            {
+              event: "provider.request.completed",
+              provider_origin: providerOrigin,
+              http_status: response.status,
+              duration_ms: Math.round(performance.now() - providerStarted),
+              response_bytes:
+                rawProviderOutput === undefined
+                  ? null
+                  : Buffer.byteLength(rawProviderOutput, "utf8"),
+              retry_after_ms: parseRetryAfterMs(
+                response.headers.get("retry-after"),
+              ),
+              ...(providerRequestId
+                ? { provider_request_id: providerRequestId }
+                : {}),
+              ...(config.logSensitiveProviderErrors && rawProviderOutput
+                ? sensitiveBody(rawProviderOutput)
+                : {}),
+            },
+            "Provider returned an error response",
+          );
+          throw classifyStatus(response, rawProviderOutput);
+        }
+        try {
+          rawProviderOutput = await boundedResponseText(
+            response,
+            config.maxResponseBytes,
+          );
+        } catch (error) {
+          logger.warn(
+            {
+              event: "provider.response.failed",
+              failure_stage: "provider_response_size",
+              failure_kind: "malformed_response",
+              ...safeError(error),
+            },
+            "Provider response exceeded the configured boundary",
+          );
+          throw error;
+        }
+        const providerDuration = Math.round(
+          performance.now() - providerStarted,
         );
-        const envelope = z
-          .object({
-            choices: z
-              .array(
-                z.object({
-                  message: z.object({ content: z.string() }),
-                }),
-              )
-              .min(1),
-          })
-          .parse(JSON.parse(rawProviderOutput));
-        const structured = receiptExtractionSchema.parse(
-          JSON.parse(envelope.choices[0]?.message.content ?? ""),
+        logger[
+          providerDuration >= (config.logSlowOperationMs ?? 1000)
+            ? "warn"
+            : "info"
+        ](
+          {
+            event: "provider.request.completed",
+            provider_origin: providerOrigin,
+            http_status: response.status,
+            duration_ms: providerDuration,
+            response_bytes: Buffer.byteLength(rawProviderOutput, "utf8"),
+          },
+          "Provider request completed",
         );
+        let envelopeValue: unknown;
+        try {
+          envelopeValue = JSON.parse(rawProviderOutput);
+        } catch {
+          logger.warn(
+            {
+              event: "provider.response.validation_failed",
+              failure_stage: "provider_envelope_json",
+              failure_kind: "malformed_response",
+              issue_count: 1,
+              issues: [{ path: "envelope", code: "invalid_json" }],
+            },
+            "Provider envelope JSON was invalid",
+          );
+          throw new ReceiptExtractionError(
+            "malformed_response",
+            false,
+            undefined,
+            rawProviderOutput,
+          );
+        }
+        const envelopeSchema = z.object({
+          choices: z
+            .array(
+              z.object({
+                message: z.object({ content: z.string() }),
+              }),
+            )
+            .min(1),
+        });
+        const parsedEnvelope = envelopeSchema.safeParse(envelopeValue);
+        if (!parsedEnvelope.success) {
+          logger.warn(
+            {
+              event: "provider.response.validation_failed",
+              failure_stage: "provider_envelope_schema",
+              failure_kind: "malformed_response",
+              issue_count: parsedEnvelope.error.issues.length,
+              issues: parsedEnvelope.error.issues.map((issue) => ({
+                path: issue.path.join("."),
+                code: issue.code,
+              })),
+            },
+            "Provider envelope schema was invalid",
+          );
+          throw new ReceiptExtractionError(
+            "malformed_response",
+            false,
+            undefined,
+            rawProviderOutput,
+          );
+        }
+        let extractionValue: unknown;
+        try {
+          extractionValue = JSON.parse(
+            parsedEnvelope.data.choices[0]?.message.content ?? "",
+          );
+        } catch {
+          extractionValue = undefined;
+        }
+        const parsedExtraction =
+          receiptExtractionSchema.safeParse(extractionValue);
+        if (!parsedExtraction.success) {
+          logger.warn(
+            {
+              event: "provider.response.validation_failed",
+              failure_stage: "extraction_schema",
+              failure_kind: "malformed_response",
+              issue_count: parsedExtraction.error.issues.length,
+              issues: parsedExtraction.error.issues.map((issue) => ({
+                path: issue.path.join("."),
+                code: issue.code,
+              })),
+            },
+            "Extracted receipt schema was invalid",
+          );
+          throw new ReceiptExtractionError(
+            "malformed_response",
+            false,
+            undefined,
+            rawProviderOutput,
+          );
+        }
+        const structured = parsedExtraction.data;
         return extractionResultSchema.parse({
           documentId: request.documentId,
           provider: "openai-compatible",
@@ -659,7 +865,11 @@ function ensureTrailingSlash(value: string): string {
 
 export function createConfiguredReceiptExtractor(
   config: ReceiptAiRuntimeConfig,
-  options: { fakeResult?: ExtractionResult; fetch?: typeof fetch } = {},
+  options: {
+    fakeResult?: ExtractionResult;
+    fetch?: typeof fetch;
+    logger?: Logger;
+  } = {},
 ): ReceiptExtractor {
   if (config.EXTRACTION_PROVIDER === "fake") {
     return options.fakeResult
@@ -675,6 +885,9 @@ export function createConfiguredReceiptExtractor(
     maxImageBytes: config.EXTRACTION_MAX_IMAGE_BYTES,
     maxResponseBytes: config.EXTRACTION_MAX_RESPONSE_BYTES,
     profileVersion: config.EXTRACTION_PROFILE_VERSION,
+    logSensitiveProviderErrors: config.LOG_SENSITIVE_PROVIDER_ERRORS ?? false,
+    logSlowOperationMs: config.LOG_SLOW_OPERATION_MS ?? 1000,
+    ...(options.logger ? { logger: options.logger } : {}),
     ...(options.fetch ? { fetch: options.fetch } : {}),
   });
 }

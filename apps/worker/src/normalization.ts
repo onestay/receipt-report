@@ -11,6 +11,7 @@ import {
   RendererFailure,
   type RenderedDocument,
 } from "./renderer.js";
+import { silentLogger, type Logger } from "@receipt-report/logging";
 
 type ClaimedJob = {
   id: string;
@@ -29,6 +30,7 @@ export class NormalizationProcessor {
     private readonly storage: FilesystemDocumentStorage,
     private readonly renderer: DocumentRenderer,
     private readonly config: WorkerConfig & ReceiptAiConfig,
+    private readonly logger: Logger = silentLogger,
   ) {}
 
   async resetInterruptedJobs(): Promise<void> {
@@ -44,6 +46,7 @@ export class NormalizationProcessor {
     });
     if (interrupted.length === 0) return;
     await this.database.$transaction(async (transaction) => {
+      let recovered = 0;
       for (const job of interrupted) {
         const reset = await transaction.normalizationJob.updateMany({
           where: {
@@ -60,7 +63,8 @@ export class NormalizationProcessor {
             lastError: null,
           },
         });
-        if (reset.count === 1)
+        if (reset.count === 1) {
+          recovered++;
           await transaction.receiptDocument.update({
             where: { id: job.documentId },
             data: {
@@ -69,7 +73,13 @@ export class NormalizationProcessor {
               normalizationStartedAt: null,
             },
           });
+        }
       }
+      if (recovered > 0)
+        this.logger.warn(
+          { event: "normalization.recovery.completed", count: recovered },
+          "Interrupted normalization jobs recovered",
+        );
     });
   }
 
@@ -116,14 +126,70 @@ export class NormalizationProcessor {
     await this.resetInterruptedJobs();
     const job = await this.claim();
     if (!job) return false;
+    const started = performance.now();
+    this.logger.info(
+      {
+        event: "normalization.job.claimed",
+        job_id: job.id,
+        document_id: job.documentId,
+        attempt_number: job.attempts,
+      },
+      "Normalization job claimed",
+    );
     try {
+      this.logger.info(
+        {
+          event: "normalization.render.started",
+          job_id: job.id,
+          document_id: job.documentId,
+        },
+        "Document rendering started",
+      );
       const rendered = await this.renderer.render(job.document);
       this.validateRenderedPages(rendered);
+      this.logger.info(
+        {
+          event: "normalization.render.succeeded",
+          job_id: job.id,
+          document_id: job.documentId,
+          renderer: rendered.renderer,
+          page_count: rendered.pages.length,
+          aggregate_bytes: rendered.pages.reduce(
+            (sum, page) => sum + page.byteSize,
+            0,
+          ),
+          aggregate_pixels: rendered.pages.reduce(
+            (sum, page) => sum + page.width * page.height,
+            0,
+          ),
+          duration_ms: Math.round(performance.now() - started),
+        },
+        "Document rendering succeeded",
+      );
       await this.publish(job, rendered);
+      this.logger.info(
+        {
+          event: "normalization.job.published",
+          job_id: job.id,
+          document_id: job.documentId,
+          duration_ms: Math.round(performance.now() - started),
+        },
+        "Normalization published",
+      );
     } catch (error) {
       const code =
         error instanceof RendererFailure ? error.code : "normalization_failed";
       await this.fail(job, code);
+      this.logger.error(
+        {
+          event: "normalization.job.failed",
+          job_id: job.id,
+          document_id: job.documentId,
+          failure_code: code,
+          duration_ms: Math.round(performance.now() - started),
+        },
+        "Normalization failed",
+      );
     }
     return true;
   }

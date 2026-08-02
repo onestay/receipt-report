@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import type { WorkerConfig } from "@receipt-report/config";
 import type { FilesystemDocumentStorage } from "@receipt-report/database";
+import { silentLogger, type Logger } from "@receipt-report/logging";
 import {
   normalizeRasterBytes,
   sharpRendererIdentity,
@@ -27,6 +28,7 @@ type CommandRunner = (
   command: string,
   args: string[],
   options: { timeoutMs: number; maxBuffer: number; memoryMb: number },
+  logger?: Logger,
 ) => Promise<CommandResult>;
 
 export class RendererFailure extends Error {
@@ -39,7 +41,9 @@ export async function runLimitedCommand(
   command: string,
   args: string[],
   options: { timeoutMs: number; maxBuffer: number; memoryMb: number },
+  logger: Logger = silentLogger,
 ): Promise<CommandResult> {
+  const started = performance.now();
   const memoryBytes = options.memoryMb * 1024 * 1024;
   const cpuSeconds = Math.max(1, Math.ceil(options.timeoutMs / 1000));
   return new Promise((resolve, reject) => {
@@ -55,12 +59,17 @@ export async function runLimitedCommand(
       },
       (error, stdout, stderr) => {
         if (error) {
-          console.error("Document renderer command failed", {
-            command,
-            code: error.code ?? "unknown",
-            signal: error.signal ?? null,
-            killed: error.killed,
-          });
+          logger.error(
+            {
+              event: "normalization.renderer.command_failed",
+              executable: command,
+              exit_code: error.code ?? "unknown",
+              signal: error.signal ?? null,
+              killed: error.killed,
+              duration_ms: Math.round(performance.now() - started),
+            },
+            "Document renderer command failed",
+          );
           reject(new RendererFailure("renderer_failed"));
           return;
         }
@@ -77,6 +86,7 @@ export class LocalDocumentRenderer implements DocumentRenderer {
     private readonly storage: FilesystemDocumentStorage,
     private readonly config: WorkerConfig,
     private readonly runCommand: CommandRunner = runLimitedCommand,
+    private readonly logger: Logger = silentLogger,
   ) {}
 
   private commandOptions(
@@ -98,6 +108,7 @@ export class LocalDocumentRenderer implements DocumentRenderer {
       "pdftoppm",
       ["-v"],
       this.commandOptions(1024 * 1024, timeoutMs),
+      this.logger,
     );
     const output = `${result.stdout.toString()} ${result.stderr.toString()}`;
     const match = output.match(/pdftoppm version\s+([^\s]+)/i);
@@ -109,7 +120,7 @@ export class LocalDocumentRenderer implements DocumentRenderer {
   async verify(): Promise<void> {
     await Promise.all([
       this.popplerVersion(),
-      this.runCommand("pdfinfo", ["-v"], this.commandOptions()),
+      this.runCommand("pdfinfo", ["-v"], this.commandOptions(), this.logger),
     ]);
   }
 
@@ -144,6 +155,7 @@ export class LocalDocumentRenderer implements DocumentRenderer {
       "pdfinfo",
       [absolutePath],
       this.commandOptions(1024 * 1024, remaining()),
+      this.logger,
     );
     const details = info.stdout.toString("utf8");
     if (/^Encrypted:\s+yes\r?$/im.test(details))
@@ -180,6 +192,7 @@ export class LocalDocumentRenderer implements DocumentRenderer {
           ),
           remaining(),
         ),
+        this.logger,
       );
       const page = await normalizeRasterBytes(
         rendered.stdout,
