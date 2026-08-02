@@ -20,6 +20,7 @@ import {
   createDeterministicFakeReceiptExtractor,
   receiptExtractionSchema,
   ReceiptExtractionError,
+  type ProposalSnapshot,
   type ReceiptExtractor,
 } from "@receipt-report/receipt-ai";
 import { ExtractionProcessor } from "./extraction.js";
@@ -129,7 +130,7 @@ async function seed(options: { revision?: string; createJob?: boolean } = {}) {
             documentId: document.id,
             normalizationRevision: revision,
             normalizationProfileVersion: "receipt-page-v1",
-            extractionProfileVersion: "de-receipt-v1",
+            extractionProfileVersion: "de-receipt-v2",
             maxAttempts: config.EXTRACTION_MAX_ATTEMPTS,
             availableAt: new Date(nowMs),
           },
@@ -163,6 +164,7 @@ describe("extraction processor", () => {
     ).resolves.toBe(true);
     expect(extract).toHaveBeenCalledWith({
       documentId: document.id,
+      categoryOptions: expect.any(Array),
       pages: [
         expect.objectContaining({ position: 0, bytes: new Uint8Array([1]) }),
         expect.objectContaining({ position: 1, bytes: new Uint8Array([2]) }),
@@ -181,7 +183,7 @@ describe("extraction processor", () => {
     });
     expect(attempt.rawProviderOutput).toContain("deterministic_fake_output");
     expect(JSON.parse(attempt.validatedOutput ?? "{}")).toMatchObject({
-      schemaVersion: "receipt-extraction-v1",
+      schemaVersion: "receipt-extraction-v2",
     });
     const proposal = await database.extractionProposal.findFirstOrThrow({
       include: { findings: true },
@@ -209,6 +211,99 @@ describe("extraction processor", () => {
         },
       }),
     ).toMatchObject({ merchantRaw: "Synthetic extraction", totalCents: 1 });
+  });
+
+  it("prefills a valid model category only on the editable proposal", async () => {
+    const { receipt, document } = await seed();
+    const absent = { value: null, confidence: null } as const;
+    await processor({
+      name: "fake",
+      async extract(request) {
+        const option = request.categoryOptions?.find(
+          (candidate) => !candidate.path.includes(" > "),
+        );
+        if (!option) throw new Error("Missing category fixture");
+        const structured = receiptExtractionSchema.parse({
+          schemaVersion: "receipt-extraction-v2",
+          profileVersion: "de-receipt-v2",
+          merchantText: { value: "Markt", confidence: 1 },
+          purchaseDate: { value: "2026-07-31", confidence: 1 },
+          purchaseTime: absent,
+          currency: { value: "EUR", confidence: 1 },
+          grossTotalCents: { value: 100, confidence: 1 },
+          netTotalCents: absent,
+          taxTotalCents: absent,
+          taxBreakdowns: [],
+          lineItems: [
+            {
+              position: 0,
+              description: { value: "Unbekanntes Produkt", confidence: 1 },
+              quantityMilli: absent,
+              unit: absent,
+              unitPriceCents: absent,
+              lineTotalCents: { value: 100, confidence: 1 },
+              categoryToken: { value: option.token, confidence: 0.5 },
+            },
+          ],
+          warnings: [],
+        });
+        return {
+          documentId: document.id,
+          provider: "fake",
+          model: "fake-v2",
+          rawProviderOutput: JSON.stringify(structured),
+          structured,
+        };
+      },
+    }).processNext();
+
+    const attempt = await database.extractionAttempt.findFirstOrThrow();
+    const options = JSON.parse(attempt.categoryOptionSnapshot ?? "[]") as {
+      categoryId: string;
+      path: string;
+    }[];
+    expect(attempt.categoryOptionFingerprint).toMatch(/^[a-f0-9]{64}$/);
+    const proposal = await database.extractionProposal.findFirstOrThrow();
+    expect(JSON.parse(proposal.snapshot)).toMatchObject({
+      lineItems: [
+        {
+          categoryId: options.find((option) => !option.path.includes(" > "))
+            ?.categoryId,
+          categoryProvenance: "model",
+          categoryConfidence: 0.5,
+        },
+      ],
+    });
+    await expect(
+      database.extractionFinding.findFirstOrThrow({
+        where: { code: "low_category_confidence" },
+      }),
+    ).resolves.toMatchObject({ severity: "info" });
+    await expect(
+      database.lineItem.count({ where: { receiptId: receipt.id } }),
+    ).resolves.toBe(0);
+  });
+
+  it("omits oversized category context without failing extraction", async () => {
+    await seed();
+    await database.category.createMany({
+      data: Array.from({ length: 501 }, (_, index) => ({
+        name: `Synthetic category ${index}`,
+        normalizedName: `synthetic category ${index}`,
+        position: 1000 + index,
+      })),
+    });
+    await expect(
+      processor(createDeterministicFakeReceiptExtractor()).processNext(),
+    ).resolves.toBe(true);
+    await expect(
+      database.extractionAttempt.findFirstOrThrow(),
+    ).resolves.toMatchObject({ categoryOptionSnapshot: "[]" });
+    await expect(
+      database.extractionFinding.findFirstOrThrow({
+        where: { code: "model_category_context_omitted" },
+      }),
+    ).resolves.toMatchObject({ severity: "info" });
   });
 
   it("publishes provenance-bearing category suggestions with store precedence", async () => {
@@ -280,7 +375,7 @@ describe("extraction processor", () => {
         attemptNumber: 1,
         provider: "fake",
         model: "old-fake-v1",
-        extractionProfileVersion: "de-receipt-v1",
+        extractionProfileVersion: "de-receipt-v2",
         status: "succeeded",
       },
     });
@@ -290,7 +385,7 @@ describe("extraction processor", () => {
         documentId: document.id,
         attemptId: oldAttempt.id,
         normalizationRevision: "revision-1",
-        extractionProfileVersion: "de-receipt-v1",
+        extractionProfileVersion: "de-receipt-v2",
         snapshot: "{}",
       },
     });
@@ -300,8 +395,8 @@ describe("extraction processor", () => {
     });
     const absent = { value: null, confidence: null } as const;
     const structured = receiptExtractionSchema.parse({
-      schemaVersion: "receipt-extraction-v1",
-      profileVersion: "de-receipt-v1",
+      schemaVersion: "receipt-extraction-v2",
+      profileVersion: "de-receipt-v2",
       merchantText: { value: "Markt", confidence: 0.9 },
       purchaseDate: { value: "2026-07-31", confidence: 0.9 },
       purchaseTime: absent,
@@ -318,6 +413,16 @@ describe("extraction processor", () => {
           unit: absent,
           unitPriceCents: absent,
           lineTotalCents: { value: 100, confidence: 0.9 },
+          categoryToken: { value: "c0", confidence: 1 },
+        },
+        {
+          position: 1,
+          description: { value: "BANANE", confidence: 0.9 },
+          quantityMilli: absent,
+          unit: absent,
+          unitPriceCents: absent,
+          lineTotalCents: { value: 0, confidence: 0.9 },
+          categoryToken: { value: "invented", confidence: 1 },
         },
       ],
       warnings: [],
@@ -338,23 +443,23 @@ describe("extraction processor", () => {
       where: { status: "pending", NOT: { id: oldProposal.id } },
       include: { findings: true },
     });
-    expect(JSON.parse(proposal.snapshot)).toMatchObject({
+    const published = JSON.parse(proposal.snapshot) as ProposalSnapshot;
+    expect(published).toMatchObject({
       merchantBrandId: brand.id,
       merchantStoreId: store.id,
-      lineItems: [
-        {
-          categoryId: null,
-          categorySuggestion: {
-            categoryId: storeCategory.id,
-            scopeKind: "store",
-          },
-          categoryProvenance: "exact_rule",
-        },
-      ],
+    });
+    expect(published.lineItems[0]).toMatchObject({
+      categoryId: null,
+      categorySuggestion: {
+        categoryId: storeCategory.id,
+        scopeKind: "store",
+      },
+      categoryProvenance: "exact_rule",
     });
     expect(proposal.findings).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ code: "category_suggestion" }),
+        expect.objectContaining({ code: "model_category_invalid" }),
       ]),
     );
     await expect(
@@ -485,7 +590,7 @@ describe("extraction processor", () => {
         attemptNumber: 1,
         provider: "fake",
         model: "deterministic-fake-v1",
-        extractionProfileVersion: "de-receipt-v1",
+        extractionProfileVersion: "de-receipt-v2",
         startedAt: new Date(nowMs - 1000),
       },
     });
@@ -512,7 +617,7 @@ describe("extraction processor", () => {
         attemptNumber: 1,
         provider: "fake",
         model: "fake-v1",
-        extractionProfileVersion: "de-receipt-v1",
+        extractionProfileVersion: "de-receipt-v2",
         status: "succeeded",
         completedAt: new Date(nowMs - 1001),
         durationMs: 10,

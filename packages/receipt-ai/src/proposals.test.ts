@@ -49,8 +49,8 @@ describe("proposal validation", () => {
   it("maps present and missing extraction values without inventing confidence", () => {
     const absent = { value: null, confidence: null };
     const extraction = receiptExtractionSchema.parse({
-      schemaVersion: "receipt-extraction-v1",
-      profileVersion: "de-receipt-v1",
+      schemaVersion: "receipt-extraction-v2",
+      profileVersion: "de-receipt-v2",
       merchantText: { value: "Markt", confidence: 0.8 },
       purchaseDate: { value: "2026-07-31", confidence: 0.9 },
       purchaseTime: absent,

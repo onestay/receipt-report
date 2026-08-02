@@ -13,8 +13,8 @@ const safeStoragePath = z.string().superRefine((value, context) => {
 const positiveLimit = z.coerce.number().int().positive();
 const extractionProfileSchema = z.object({
   EXTRACTION_PROFILE_VERSION: z
-    .literal("de-receipt-v1")
-    .default("de-receipt-v1"),
+    .literal("de-receipt-v2")
+    .default("de-receipt-v2"),
 });
 
 const receiptAiSchema = z

@@ -58,7 +58,7 @@ const proposal = {
   documentId,
   attemptId: "cm62345678901234567890123",
   normalizationRevision: "revision-1",
-  extractionProfileVersion: "de-receipt-v1",
+  extractionProfileVersion: "de-receipt-v2",
   status: "pending",
   snapshot: {
     merchantRaw: "Synthetic Markt",

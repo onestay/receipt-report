@@ -643,6 +643,7 @@ export const proposalLineSchema = z
     lineTotalCents: signedEuroCentsSchema,
     lineTotalConfidence: z.number().min(0).max(1).nullable().optional(),
     categoryId: idSchema.nullable(),
+    categoryConfidence: z.number().min(0).max(1).nullable().optional(),
     categorySuggestion: proposalCategorySuggestionSchema.nullable(),
     categoryProvenance: z
       .enum(["model", "exact_rule", "manual"])
@@ -741,6 +742,12 @@ export const correctionQualityBucketSchema = z.object({
   unchangedFields: z.number().int().nonnegative(),
   missingFilled: z.number().int().nonnegative(),
   modelValuesRemoved: z.number().int().nonnegative(),
+  acceptedModelCategories: z.number().int().nonnegative(),
+  correctedModelCategories: z.number().int().nonnegative(),
+  clearedModelCategories: z.number().int().nonnegative(),
+  exactRuleCategories: z.number().int().nonnegative(),
+  unassignedCategories: z.number().int().nonnegative(),
+  manualCategories: z.number().int().nonnegative(),
   correctionRate: z.number().min(0).max(1),
 });
 export const correctionQualitySummarySchema = z.object({

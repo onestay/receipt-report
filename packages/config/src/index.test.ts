@@ -129,7 +129,7 @@ describe("configuration", () => {
   it("defaults receipt AI to the local deterministic provider", () => {
     expect(parseReceiptAiConfig({})).toEqual({
       EXTRACTION_PROVIDER: "fake",
-      EXTRACTION_PROFILE_VERSION: "de-receipt-v1",
+      EXTRACTION_PROFILE_VERSION: "de-receipt-v2",
       EXTRACTION_TIMEOUT_MS: 60_000,
       EXTRACTION_MAX_PAGES: 10,
       EXTRACTION_MAX_IMAGE_BYTES: 20 * 1024 * 1024,
@@ -160,7 +160,7 @@ describe("configuration", () => {
 
   it("lets the API validate the shared profile without receiving provider secrets", () => {
     expect(parseReceiptAiProfileConfig({})).toEqual({
-      EXTRACTION_PROFILE_VERSION: "de-receipt-v1",
+      EXTRACTION_PROFILE_VERSION: "de-receipt-v2",
     });
     expect(() =>
       parseReceiptAiProfileConfig({ EXTRACTION_PROFILE_VERSION: "unknown" }),

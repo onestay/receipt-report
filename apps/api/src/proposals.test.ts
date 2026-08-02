@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDatabase, type Database } from "@receipt-report/database";
 import type { ProposalSnapshot } from "@receipt-report/contracts";
 import { createApp } from "./app.js";
+import { categoryQualityOutcome } from "./proposals.js";
 
 let directory = "";
 let database: Database;
@@ -33,7 +34,7 @@ afterEach(async () => {
 function app() {
   return createApp({
     database,
-    extractionConfig: { maxAttempts: 3, profileVersion: "de-receipt-v1" },
+    extractionConfig: { maxAttempts: 3, profileVersion: "de-receipt-v2" },
   });
 }
 function snapshot(totalCents = 100): ProposalSnapshot {
@@ -98,7 +99,7 @@ async function seed(proposalSnapshot = snapshot()) {
       documentId: document.id,
       normalizationRevision: "revision-1",
       normalizationProfileVersion: "receipt-page-v1",
-      extractionProfileVersion: "de-receipt-v1",
+      extractionProfileVersion: "de-receipt-v2",
       status: "succeeded",
       attempts: 1,
       maxAttempts: 3,
@@ -110,7 +111,7 @@ async function seed(proposalSnapshot = snapshot()) {
       attemptNumber: 1,
       provider: "fake",
       model: "fake-v1",
-      extractionProfileVersion: "de-receipt-v1",
+      extractionProfileVersion: "de-receipt-v2",
       status: "succeeded",
     },
   });
@@ -120,7 +121,7 @@ async function seed(proposalSnapshot = snapshot()) {
       documentId: document.id,
       attemptId: attempt.id,
       normalizationRevision: "revision-1",
-      extractionProfileVersion: "de-receipt-v1",
+      extractionProfileVersion: "de-receipt-v2",
       snapshot: JSON.stringify(proposalSnapshot),
     },
   });
@@ -128,6 +129,21 @@ async function seed(proposalSnapshot = snapshot()) {
 }
 
 describe("proposal API", () => {
+  it.each([
+    ["model", "unchanged", "category", "accepted_model"],
+    ["model", "changed", "category", "corrected_model"],
+    ["model", "value_removed", null, "cleared_model"],
+    ["exact_rule", "missing_filled", "category", "exact_rule"],
+    [null, "unchanged", null, "unassigned"],
+    ["manual", "changed", "category", "manual"],
+  ])(
+    "classifies category feedback as %s",
+    (provenance, correctionKind, accepted, expected) => {
+      expect(categoryQualityOutcome(provenance, correctionKind, accepted)).toBe(
+        expected,
+      );
+    },
+  );
   it("returns the current sanitized proposal", async () => {
     const seeded = await seed();
     const response = await request(app())
@@ -255,7 +271,7 @@ describe("proposal API", () => {
     expect(await database.extractionDecision.count()).toBe(1);
     const quality = await request(app())
       .get(
-        "/api/v1/extraction-quality?profileVersion=de-receipt-v1&model=fake-v1&fieldKind=purchaseTime&from=2026-01-01&to=2026-12-31",
+        "/api/v1/extraction-quality?profileVersion=de-receipt-v2&model=fake-v1&fieldKind=purchaseTime&from=2026-01-01&to=2026-12-31",
       )
       .expect(200);
     expect(quality.body.totals).toMatchObject({
@@ -271,6 +287,51 @@ describe("proposal API", () => {
     expect(unfiltered.body.totals).toMatchObject({
       proposedFields: events.length,
       modelValuesRemoved: 1,
+    });
+  });
+
+  it("accounts for model-prefilled categories through real approval", async () => {
+    const category = await database.category.create({
+      data: {
+        name: "Synthetic model category",
+        normalizedName: "synthetic model category",
+        position: 950,
+      },
+    });
+    const proposed = snapshot();
+    const line = proposed.lineItems[0];
+    if (!line) throw new Error("Missing line fixture");
+    line.categoryId = category.id;
+    line.categoryProvenance = "model";
+    line.categoryConfidence = 0.9;
+    const seeded = await seed(proposed);
+
+    await request(app())
+      .post(
+        `/api/v1/receipts/${seeded.receipt.id}/extraction-proposals/${seeded.proposal.id}/approve`,
+      )
+      .send({
+        receiptUpdatedAt: seeded.receipt.updatedAt.toISOString(),
+        normalizationRevision: "revision-1",
+        snapshot: proposed,
+        acknowledgedWarningCodes: [],
+      })
+      .expect(200);
+
+    await expect(
+      database.correctionEvent.findFirstOrThrow({
+        where: {
+          proposalId: seeded.proposal.id,
+          fieldKind: "lineItem.categoryId",
+          sourcePosition: 0,
+        },
+      }),
+    ).resolves.toMatchObject({ originalCategoryProvenance: "model" });
+    const quality = await request(app())
+      .get("/api/v1/extraction-quality")
+      .expect(200);
+    expect(quality.body.totals).toMatchObject({
+      acceptedModelCategories: 1,
     });
   });
 

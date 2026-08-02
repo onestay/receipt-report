@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { ReceiptAiConfig, WorkerConfig } from "@receipt-report/config";
 import type {
   Database,
@@ -12,6 +12,8 @@ import {
   type ReceiptExtractionErrorKind,
   type ReceiptExtractor,
   type ProposalSnapshot,
+  type ProposalFinding,
+  type ExtractionCategoryOption,
 } from "@receipt-report/receipt-ai";
 
 type ExtractionProcessorConfig = WorkerConfig & ReceiptAiConfig;
@@ -213,11 +215,20 @@ export class ExtractionProcessor {
           bytes: new Uint8Array(await this.storage.read(page.relativePath)),
         })),
       );
+      const categoryContext = await this.categoryContext();
+      await this.database.extractionAttempt.update({
+        where: { id: job.attemptId },
+        data: {
+          categoryOptionSnapshot: JSON.stringify(categoryContext.options),
+          categoryOptionFingerprint: categoryContext.fingerprint,
+        },
+      });
       const result = await this.extractor.extract({
         documentId: job.documentId,
         pages,
+        categoryOptions: categoryContext.options,
       });
-      await this.publish(job, result, startedAt);
+      await this.publish(job, result, startedAt, categoryContext.omitted);
     } catch (error) {
       const failure: Failure =
         error instanceof ReceiptExtractionError
@@ -241,13 +252,37 @@ export class ExtractionProcessor {
     job: ClaimedExtractionJob,
     result: Awaited<ReturnType<ReceiptExtractor["extract"]>>,
     startedAt: Date,
+    categoryContextOmitted: boolean,
   ): Promise<void> {
     const now = this.clock();
-    const proposal = await this.buildProposal(
+    const built = await this.buildProposal(
       job.documentId,
       result.structured,
+      JSON.parse(
+        (
+          await this.database.extractionAttempt.findUniqueOrThrow({
+            where: { id: job.attemptId },
+            select: { categoryOptionSnapshot: true },
+          })
+        ).categoryOptionSnapshot ?? "[]",
+      ) as ExtractionCategoryOption[],
     );
-    const findings = validateProposal(proposal);
+    const proposal = built.proposal;
+    const findings = [
+      ...validateProposal(proposal),
+      ...built.findings,
+      ...(categoryContextOmitted
+        ? [
+            {
+              code: "model_category_context_omitted",
+              severity: "info" as const,
+              fieldPath: null,
+              message:
+                "Category context was omitted because it exceeded provider bounds",
+            },
+          ]
+        : []),
+    ];
     await this.database.$transaction(async (transaction) => {
       const currentDocument = await transaction.receiptDocument.findFirst({
         where: {
@@ -341,8 +376,13 @@ export class ExtractionProcessor {
   private async buildProposal(
     documentId: string,
     extraction: Parameters<typeof extractionToProposal>[0],
-  ): Promise<ProposalSnapshot> {
+    categoryOptions: ExtractionCategoryOption[],
+  ): Promise<{ proposal: ProposalSnapshot; findings: ProposalFinding[] }> {
     const snapshot = extractionToProposal(extraction);
+    const findings: ProposalFinding[] = [];
+    const optionByToken = new Map(
+      categoryOptions.map((option) => [option.token, option]),
+    );
     const document = await this.database.receiptDocument.findUniqueOrThrow({
       where: { id: documentId },
       select: {
@@ -351,8 +391,8 @@ export class ExtractionProcessor {
     });
     snapshot.merchantBrandId = document.receipt.merchantBrandId;
     snapshot.merchantStoreId = document.receipt.merchantStoreId;
-    for (const line of snapshot.lineItems) {
-      if (line.categoryId !== null || !line.description.trim()) continue;
+    for (const [index, line] of snapshot.lineItems.entries()) {
+      if (!line.description.trim()) continue;
       const rules = await this.database.categorySuggestionRule.findMany({
         where: {
           normalizedDescription: normalizeRuleDescription(line.description),
@@ -399,9 +439,103 @@ export class ExtractionProcessor {
           scopeKind: rule.scopeKind as "global" | "brand" | "store",
         };
         line.categoryProvenance = "exact_rule";
+        line.categoryConfidence = null;
+        continue;
       }
+      const token = extraction.lineItems[index]?.categoryToken?.value ?? null;
+      if (token === null) continue;
+      const option = optionByToken.get(token);
+      const category = option
+        ? await this.database.category.findUnique({
+            where: { id: option.categoryId },
+            include: {
+              parent: { select: { archivedAt: true } },
+              _count: { select: { children: true } },
+            },
+          })
+        : null;
+      if (
+        !option ||
+        !category ||
+        category.archivedAt !== null ||
+        (category.parent?.archivedAt ?? null) !== null ||
+        category._count.children !== 0
+      ) {
+        line.categoryConfidence = null;
+        findings.push({
+          code: "model_category_invalid",
+          severity: "info",
+          fieldPath: `lineItems.${index}.categoryId`,
+          message: "The model category was unavailable",
+        });
+        continue;
+      }
+      line.categoryId = option.categoryId;
+      line.categoryProvenance = "model";
+      line.categoryConfidence =
+        extraction.lineItems[index]?.categoryToken?.confidence ?? null;
+      if (line.categoryConfidence !== null && line.categoryConfidence < 0.7)
+        findings.push({
+          code: "low_category_confidence",
+          severity: "info",
+          fieldPath: `lineItems.${index}.categoryId`,
+          message: "Provider category confidence is low",
+        });
     }
-    return snapshot;
+    return { proposal: snapshot, findings };
+  }
+
+  private async categoryContext(): Promise<{
+    options: ExtractionCategoryOption[];
+    fingerprint: string;
+    omitted: boolean;
+  }> {
+    const categories = await this.database.category.findMany({
+      include: {
+        parent: { select: { name: true, archivedAt: true } },
+        _count: { select: { children: true } },
+      },
+    });
+    const ordered = categories
+      .filter((category) => category.parentId === null)
+      .sort(
+        (left, right) =>
+          left.position - right.position || left.id.localeCompare(right.id),
+      )
+      .flatMap((parent) => [
+        parent,
+        ...categories
+          .filter((category) => category.parentId === parent.id)
+          .sort(
+            (left, right) =>
+              left.position - right.position || left.id.localeCompare(right.id),
+          ),
+      ]);
+    const options = ordered
+      .filter(
+        (category) =>
+          category.archivedAt === null &&
+          (category.parent?.archivedAt ?? null) === null &&
+          category._count.children === 0,
+      )
+      .map((category, index) => ({
+        token: `c${index}`,
+        categoryId: category.id,
+        path: category.parent
+          ? `${category.parent.name} > ${category.name}`
+          : category.name,
+      }));
+    const serialized = JSON.stringify(options);
+    const omitted =
+      options.length > 500 || Buffer.byteLength(serialized, "utf8") > 65_536;
+    const bounded = omitted ? [] : options;
+    return {
+      options: bounded,
+      fingerprint: createHash("sha256")
+        .update(JSON.stringify(bounded))
+        .digest("hex"),
+      omitted,
+    };
   }
 
   private retryDelay(job: ClaimedExtractionJob, failure: Failure): number {
