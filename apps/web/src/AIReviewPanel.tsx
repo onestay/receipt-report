@@ -361,6 +361,9 @@ export function AIReviewPanel({
         lifecycle.proposal?.snapshot.lineItems[index]?.lineTotalConfidence ??
         null,
       categoryId: line.categoryId,
+      categoryConfidence:
+        lifecycle.proposal?.snapshot.lineItems[index]?.categoryConfidence ??
+        null,
       categorySuggestion:
         lifecycle.proposal?.snapshot.lineItems[index]?.categorySuggestion ??
         null,
@@ -822,6 +825,8 @@ export function AIReviewPanel({
                             ? "model"
                             : "unassigned"}
                   </small>
+                  {proposed?.categoryProvenance === "model" &&
+                    confidence(proposed.categoryConfidence ?? null)}
                   {categoryTouched.has(index) && line.categoryId && (
                     <button
                       type="button"

@@ -106,6 +106,14 @@ async function evidence(page: Page, name: string) {
   });
 }
 
+async function modelCategoryEvidence(page: Page) {
+  if (!process.env.CAPTURE_UI_EVIDENCE) return;
+  await page.screenshot({
+    path: resolve("docs/screenshots/issue-56/model-category-review.png"),
+    fullPage: true,
+  });
+}
+
 test("reviews automatic extraction, approves edits, and preserves later human edits", async ({
   page,
   request,
@@ -154,8 +162,10 @@ test("reviews automatic extraction, approves edits, and preserves later human ed
                 quantityMilli: 1000,
                 unitPriceCents: 90,
                 lineTotalCents: 90,
-                categoryId: null,
+                categoryId: rememberedCategoryId,
+                categoryConfidence: 0.65,
                 categorySuggestion: null,
+                categoryProvenance: "model",
                 kind: "unknown",
               },
             ],
@@ -192,6 +202,13 @@ test("reviews automatic extraction, approves edits, and preserves later human ed
             fieldPath: "lineItems.0.description",
             message: "Provider confidence is low",
           },
+          {
+            proposalId: proposal.id,
+            code: "low_category_confidence",
+            severity: "info",
+            fieldPath: "lineItems.0.categoryId",
+            message: "Provider category confidence is low",
+          },
         ],
       }),
     ]);
@@ -206,6 +223,9 @@ test("reviews automatic extraction, approves edits, and preserves later human ed
   await expect(
     review.getByRole("button", { name: /Merchant is required/ }),
   ).toBeVisible();
+  await expect(review.getByText("Source: model")).toBeVisible();
+  await expect(review.getByText("65% confidence")).toBeVisible();
+  await modelCategoryEvidence(page);
   await evidence(page, "desktop-needs-review-findings");
 
   await review.getByLabel("Merchant").fill("Reviewed Markt");

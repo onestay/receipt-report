@@ -1,5 +1,17 @@
 # AI receipt processing
 
+The v2 extraction profile sends a bounded snapshot of active assignable category
+paths to the configured remote provider alongside receipt pages. The snapshot is
+stored locally with its SHA-256 fingerprint on the attempt and follows the same
+backup and retention boundary as other durable extraction metadata. It is not
+returned by ordinary lifecycle APIs or written to ordinary logs.
+
+Provider category choices are advisory. Exact local rules are evaluated first
+and retain their explicit-adoption behavior; otherwise a valid model choice may
+prefill only the editable proposal. Stale or invalid choices, and snapshots that
+exceed provider bounds, become informational findings and never fail an
+otherwise valid extraction. Canonical data changes only after review approval.
+
 Correction feedback from approved proposals stays local. Before/after values can
 contain sensitive merchant and product text; they are part of SQLite backups and
 are never sent to the extraction provider. Quality summaries read only this

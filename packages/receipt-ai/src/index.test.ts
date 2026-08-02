@@ -348,6 +348,9 @@ describe("OpenAI-compatible adapter", () => {
     if (!firstPage) throw new Error("Missing fixture page");
     const multiPageRequest: ExtractionRequest = {
       ...request,
+      categoryOptions: [
+        { token: "c0", categoryId: "category-1", path: "Food > Dairy" },
+      ],
       pages: [
         firstPage,
         {
@@ -379,6 +382,8 @@ describe("OpenAI-compatible adapter", () => {
     expect(captured?.body).toContain("data:image/png;base64,AQID");
     expect(captured?.body).toContain("data:image/jpeg;base64,BAUG");
     expect(captured?.body).toContain(GERMAN_RECEIPT_PROFILE_VERSION);
+    expect(captured?.body).toContain("c0: Food > Dairy");
+    expect(captured?.body).toContain('"enum":["c0",null]');
     expect(captured?.body).toContain('"type":["integer","null"]');
     expect(captured?.body).not.toContain('"anyOf"');
     // The provider rejects these keywords in a strict schema.
@@ -405,6 +410,54 @@ describe("OpenAI-compatible adapter", () => {
     const unionCount = (captured?.body.match(/"type":\[/g) ?? []).length;
     expect(unionCount).toBe(14);
     expect(germanReceiptProfile.systemPrompt).toContain("Erfinde keine");
+  });
+
+  it("keeps the maximum category-token enum compact", async () => {
+    let captured = "";
+    const extraction = validExtraction();
+    lineAt(extraction, 0).categoryToken = present("c499", 0.75);
+    const baseUrl = await fakeProvider((incoming) => {
+      captured = incoming.body;
+      return { body: providerEnvelope(extraction) };
+    });
+    const categoryOptions = Array.from({ length: 500 }, (_, index) => ({
+      token: `c${index}`,
+      categoryId: `category-${index}`,
+      path: `Synthetic > Category ${index}`,
+    }));
+    const output = await adapter(baseUrl).extract({
+      ...request,
+      categoryOptions,
+    });
+    expect(output.structured.lineItems[0]?.categoryToken).toEqual({
+      value: "c499",
+      confidence: 0.75,
+    });
+    const body = JSON.parse(captured) as {
+      response_format: {
+        json_schema: {
+          schema: {
+            properties: {
+              lineItems: {
+                items: {
+                  properties: {
+                    categoryToken: {
+                      properties: { value: { enum: unknown[] } };
+                    };
+                  };
+                };
+              };
+            };
+          };
+        };
+      };
+    };
+    const values =
+      body.response_format.json_schema.schema.properties.lineItems.items
+        .properties.categoryToken.properties.value.enum;
+    expect(values).toHaveLength(501);
+    expect(JSON.stringify(values).length).toBeLessThan(3_500);
+    expect((captured.match(/"type":\[/g) ?? []).length).toBe(14);
   });
 
   it("rejects page and byte limits before calling the provider", async () => {

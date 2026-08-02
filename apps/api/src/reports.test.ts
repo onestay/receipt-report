@@ -30,7 +30,7 @@ afterEach(async () => {
 const app = () =>
   createApp({
     database,
-    extractionConfig: { maxAttempts: 3, profileVersion: "de-receipt-v1" },
+    extractionConfig: { maxAttempts: 3, profileVersion: "de-receipt-v2" },
   });
 
 async function receipt(
@@ -88,7 +88,7 @@ async function proposals(
       documentId: document.id,
       normalizationRevision: `rev-${receiptId}`,
       normalizationProfileVersion: "receipt-page-v1",
-      extractionProfileVersion: "de-receipt-v1",
+      extractionProfileVersion: "de-receipt-v2",
       status: "succeeded",
       attempts: count,
       maxAttempts: 3,
@@ -101,7 +101,7 @@ async function proposals(
         attemptNumber: index + 1,
         provider: "fake",
         model: "fake-v1",
-        extractionProfileVersion: "de-receipt-v1",
+        extractionProfileVersion: "de-receipt-v2",
         status: "succeeded",
       },
     });
@@ -111,7 +111,7 @@ async function proposals(
         documentId: document.id,
         attemptId: attempt.id,
         normalizationRevision: `rev-${receiptId}`,
-        extractionProfileVersion: "de-receipt-v1",
+        extractionProfileVersion: "de-receipt-v2",
         snapshot: "{}",
         status: index === count - 1 ? finalStatus : "approved",
       },

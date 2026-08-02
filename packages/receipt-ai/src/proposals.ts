@@ -35,6 +35,7 @@ export function extractionToProposal(
       unitPriceCents: line.unitPriceCents.value,
       lineTotalCents: line.lineTotalCents.value ?? 0,
       lineTotalConfidence: line.lineTotalCents.confidence,
+      categoryConfidence: line.categoryToken?.confidence ?? null,
       categoryId: null,
       categorySuggestion: null,
       categoryProvenance: null,

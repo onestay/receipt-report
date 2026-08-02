@@ -25,7 +25,7 @@ services:
       STORAGE_PATH: /data/documents
       WEB_DIST_DIR: /app/apps/web/dist
       OPERATOR_STALE_AFTER_MS: ${OPERATOR_STALE_AFTER_MS:-900000}
-      EXTRACTION_PROFILE_VERSION: ${EXTRACTION_PROFILE_VERSION:-de-receipt-v1}
+      EXTRACTION_PROFILE_VERSION: ${EXTRACTION_PROFILE_VERSION:-de-receipt-v2}
     ports:
       - "127.0.0.1:${RECEIPT_REPORT_PORT:-3000}:3000"
     volumes:
@@ -57,7 +57,7 @@ services:
       WORKER_READY_FILE: /tmp/receipt-report-worker.ready
       NORMALIZATION_VERIFY_RENDERER: "true"
       EXTRACTION_PROVIDER: ${EXTRACTION_PROVIDER:-openai-compatible}
-      EXTRACTION_PROFILE_VERSION: ${EXTRACTION_PROFILE_VERSION:-de-receipt-v1}
+      EXTRACTION_PROFILE_VERSION: ${EXTRACTION_PROFILE_VERSION:-de-receipt-v2}
     volumes:
       - receipt-data:/data
     healthcheck:

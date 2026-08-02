@@ -7,8 +7,8 @@ import {
 } from "@receipt-report/contracts";
 export * from "./proposals.js";
 
-export const EXTRACTION_SCHEMA_VERSION = "receipt-extraction-v1";
-export const GERMAN_RECEIPT_PROFILE_VERSION = "de-receipt-v1";
+export const EXTRACTION_SCHEMA_VERSION = "receipt-extraction-v2";
+export const GERMAN_RECEIPT_PROFILE_VERSION = "de-receipt-v2";
 
 const signedCentsSchema = z.number().int().safe();
 const nonNegativeCentsSchema = euroCentsSchema;
@@ -71,6 +71,7 @@ export const extractedLineItemSchema = z
     unit: extractedField(extractedUnitSchema),
     unitPriceCents: extractedField(signedCentsSchema),
     lineTotalCents: extractedField(signedCentsSchema),
+    categoryToken: extractedField(z.string().trim().min(1).max(8)).optional(),
   })
   .strict();
 
@@ -126,6 +127,18 @@ export const extractionRequestSchema = z
   .object({
     documentId: z.string().min(1),
     pages: z.array(normalizedPageSchema).min(1),
+    categoryOptions: z
+      .array(
+        z
+          .object({
+            token: z.string().regex(/^c\d{1,3}$/),
+            categoryId: z.string().min(1),
+            path: z.string().trim().min(1).max(1000),
+          })
+          .strict(),
+      )
+      .max(500)
+      .optional(),
   })
   .strict()
   .superRefine((request, context) => {
@@ -153,6 +166,9 @@ export const extractionResultSchema = z
 export type ReceiptExtraction = z.infer<typeof receiptExtractionSchema>;
 export type ExtractionRequest = z.infer<typeof extractionRequestSchema>;
 export type ExtractionResult = z.infer<typeof extractionResultSchema>;
+export type ExtractionCategoryOption = NonNullable<
+  ExtractionRequest["categoryOptions"]
+>[number];
 
 export type ExtractionTotalReconciliation = {
   complete: boolean;
@@ -230,6 +246,7 @@ export const germanReceiptProfile = {
     "Geldwerte sind ganzzahlige Cent. Beleg-Gesamtsummen sind nicht negativ.",
     "Rabatte, Retouren und Pfandrueckgaben duerfen negative Zeilenbetraege haben.",
     "Positionen und Seiten sind nullbasiert und lueckenlos geordnet.",
+    "Waehle categoryToken nur aus den bereitgestellten Kategorien; sonst value und confidence null.",
     "Antworte ausschliesslich mit dem angeforderten JSON-Objekt.",
   ].join(" "),
 } as const;
@@ -283,6 +300,7 @@ const lineItemJsonSchema = {
     "unit",
     "unitPriceCents",
     "lineTotalCents",
+    "categoryToken",
   ],
   properties: {
     position: { type: "integer", minimum: 0 },
@@ -294,6 +312,7 @@ const lineItemJsonSchema = {
     }),
     unitPriceCents: nullableFieldSchema(signedCentsJsonSchema),
     lineTotalCents: nullableFieldSchema(signedCentsJsonSchema),
+    categoryToken: nullableFieldSchema({ type: "string", enum: [] }),
   },
 } as const;
 const taxBreakdownJsonSchema = {
@@ -385,6 +404,23 @@ function stripUnsupportedJsonSchemaKeywords(schema: unknown): unknown {
 }
 
 const providerJsonSchema = stripUnsupportedJsonSchemaKeywords(jsonSchema);
+
+function providerSchemaFor(categoryTokens: string[]): unknown {
+  const schema = structuredClone(providerJsonSchema) as {
+    properties: {
+      lineItems: {
+        items: {
+          properties: {
+            categoryToken: { properties: { value: { enum: unknown[] } } };
+          };
+        };
+      };
+    };
+  };
+  schema.properties.lineItems.items.properties.categoryToken.properties.value.enum =
+    [...categoryTokens, null];
+  return schema;
+}
 
 export type OpenAiCompatibleExtractorConfig = {
   baseUrl: string;
@@ -532,7 +568,15 @@ export function createOpenAiCompatibleReceiptExtractor(
                 {
                   role: "user",
                   content: [
-                    { type: "text", text: "Extrahiere diesen Kassenbeleg." },
+                    {
+                      type: "text",
+                      text: [
+                        "Extrahiere diesen Kassenbeleg.",
+                        (request.categoryOptions ?? []).length
+                          ? `Kategorien: ${(request.categoryOptions ?? []).map(({ token, path }) => `${token}: ${path}`).join("; ")}`
+                          : "Keine Kategorien verfuegbar; categoryToken muss null sein.",
+                      ].join(" "),
+                    },
                     ...request.pages.map((page) => ({
                       type: "image_url",
                       image_url: {
@@ -547,7 +591,11 @@ export function createOpenAiCompatibleReceiptExtractor(
                 json_schema: {
                   name: "german_receipt_extraction",
                   strict: true,
-                  schema: providerJsonSchema,
+                  schema: providerSchemaFor(
+                    (request.categoryOptions ?? []).map(
+                      (option) => option.token,
+                    ),
+                  ),
                 },
               },
             }),

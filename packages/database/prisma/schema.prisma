@@ -175,6 +175,8 @@ model ExtractionAttempt {
   rawProviderOutput        String?
   rawPurgedAt              DateTime?
   validatedOutput          String?
+  categoryOptionSnapshot   String?
+  categoryOptionFingerprint String?
   createdAt                DateTime            @default(now())
   proposal                 ExtractionProposal?
   correctionEvents         CorrectionEvent[]
@@ -255,6 +257,7 @@ model CorrectionEvent {
   correctionKind           String
   proposedValue            String
   acceptedValue            String
+  originalCategoryProvenance String?
   createdAt                DateTime            @default(now())
 
   @@unique([decisionId, fieldPath])

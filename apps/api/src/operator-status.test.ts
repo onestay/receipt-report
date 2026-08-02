@@ -63,7 +63,7 @@ describe("operator status API", () => {
         documentId: document.id,
         normalizationRevision: "r1",
         normalizationProfileVersion: "receipt-page-v1",
-        extractionProfileVersion: "de-receipt-v1",
+        extractionProfileVersion: "de-receipt-v2",
         status: "retry_wait",
         maxAttempts: 5,
         lastErrorKind: "provider_authentication",

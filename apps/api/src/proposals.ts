@@ -44,6 +44,27 @@ function output(record: StoredProposal) {
   });
 }
 
+export function categoryQualityOutcome(
+  provenance: string | null,
+  correctionKind: string,
+  accepted: string | null,
+):
+  | "accepted_model"
+  | "corrected_model"
+  | "cleared_model"
+  | "exact_rule"
+  | "unassigned"
+  | null {
+  if (provenance === "model") {
+    if (accepted === null) return "cleared_model";
+    return correctionKind === "unchanged"
+      ? "accepted_model"
+      : "corrected_model";
+  }
+  if (provenance === "exact_rule" && accepted !== null) return "exact_rule";
+  return accepted === null ? "unassigned" : null;
+}
+
 export class ProposalRepository {
   constructor(
     private readonly database: Database,
@@ -259,6 +280,12 @@ export class ProposalRepository {
           correctionKind: comparison.correctionKind,
           proposedValue: JSON.stringify(comparison.proposed),
           acceptedValue: JSON.stringify(comparison.accepted),
+          originalCategoryProvenance:
+            comparison.fieldKind === "categoryId" &&
+            comparison.sourcePosition !== null
+              ? (original.lineItems[comparison.sourcePosition]
+                  ?.categoryProvenance ?? null)
+              : null,
         })),
       });
       await transaction.extractionProposal.update({
@@ -304,6 +331,11 @@ export class ProposalRepository {
       unchangedFields: number;
       missingFilled: number;
       modelValuesRemoved: number;
+      acceptedModelCategories: number;
+      correctedModelCategories: number;
+      clearedModelCategories: number;
+      exactRuleCategories: number;
+      unassignedCategories: number;
     };
     const blank = (): Counts => ({
       proposedFields: 0,
@@ -311,18 +343,36 @@ export class ProposalRepository {
       unchangedFields: 0,
       missingFilled: 0,
       modelValuesRemoved: 0,
+      acceptedModelCategories: 0,
+      correctedModelCategories: 0,
+      clearedModelCategories: 0,
+      exactRuleCategories: 0,
+      unassignedCategories: 0,
     });
-    const increment = (counts: Counts, kind: string) => {
+    const increment = (counts: Counts, event: (typeof events)[number]) => {
+      const kind = event.correctionKind;
       counts.proposedFields++;
       if (kind === "unchanged") counts.unchangedFields++;
       else counts.changedFields++;
       if (kind === "missing_filled") counts.missingFilled++;
       if (kind === "value_removed") counts.modelValuesRemoved++;
+      if (event.fieldKind !== "categoryId") return;
+      const accepted = JSON.parse(event.acceptedValue) as string | null;
+      const outcome = categoryQualityOutcome(
+        event.originalCategoryProvenance,
+        kind,
+        accepted,
+      );
+      if (outcome === "accepted_model") counts.acceptedModelCategories++;
+      else if (outcome === "corrected_model") counts.correctedModelCategories++;
+      else if (outcome === "cleared_model") counts.clearedModelCategories++;
+      else if (outcome === "exact_rule") counts.exactRuleCategories++;
+      else if (outcome === "unassigned") counts.unassignedCategories++;
     };
     const totals = blank();
     const grouped = new Map<string, Counts>();
     for (const event of events) {
-      increment(totals, event.correctionKind);
+      increment(totals, event);
       const key = JSON.stringify([
         event.extractionProfileVersion,
         event.provider,
@@ -330,7 +380,7 @@ export class ProposalRepository {
         event.fieldKind,
       ]);
       const counts = grouped.get(key) ?? blank();
-      increment(counts, event.correctionKind);
+      increment(counts, event);
       grouped.set(key, counts);
     }
     const rate = (counts: Counts) =>

@@ -75,7 +75,7 @@ async function seed(status: "complete" | "pending" = "complete") {
 function app() {
   return createApp({
     database,
-    extractionConfig: { maxAttempts: 3, profileVersion: "de-receipt-v1" },
+    extractionConfig: { maxAttempts: 3, profileVersion: "de-receipt-v2" },
   });
 }
 
@@ -105,7 +105,7 @@ describe("extraction job API", () => {
         attemptNumber: 1,
         provider: "fake",
         model: "fake-v1",
-        extractionProfileVersion: "de-receipt-v1",
+        extractionProfileVersion: "de-receipt-v2",
         status: "succeeded",
         completedAt: new Date(),
         durationMs: 5,
@@ -144,7 +144,7 @@ describe("extraction job API", () => {
         documentId: document.id,
         normalizationRevision: "revision-1",
         normalizationProfileVersion: "receipt-page-v1",
-        extractionProfileVersion: "de-receipt-v1",
+        extractionProfileVersion: "de-receipt-v2",
         status: "failed",
         attempts: 3,
         maxAttempts: 3,
