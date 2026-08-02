@@ -133,6 +133,8 @@ export const normalizedPageSchema = z
 export const extractionRequestSchema = z
   .object({
     documentId: z.string().min(1),
+    jobId: z.string().min(1).optional(),
+    attemptId: z.string().min(1).optional(),
     pages: z.array(normalizedPageSchema).min(1),
     categoryOptions: z
       .array(
@@ -566,6 +568,11 @@ export function createOpenAiCompatibleReceiptExtractor(
     name: "openai-compatible",
     async extract(input) {
       const request = extractionRequestSchema.parse(input);
+      const correlation = {
+        document_id: request.documentId,
+        ...(request.jobId ? { job_id: request.jobId } : {}),
+        ...(request.attemptId ? { attempt_id: request.attemptId } : {}),
+      };
       const totalBytes = request.pages.reduce(
         (sum, page) => sum + page.bytes.byteLength,
         0,
@@ -582,6 +589,7 @@ export function createOpenAiCompatibleReceiptExtractor(
       logger.info(
         {
           event: "provider.request.started",
+          ...correlation,
           provider_origin: providerOrigin,
           model: config.model,
           page_count: request.pages.length,
@@ -648,6 +656,7 @@ export function createOpenAiCompatibleReceiptExtractor(
           logger.warn(
             {
               event: "provider.request.failed",
+              ...correlation,
               failure_stage: "provider_timeout",
               failure_kind: "timeout",
               duration_ms: Math.round(performance.now() - providerStarted),
@@ -659,6 +668,7 @@ export function createOpenAiCompatibleReceiptExtractor(
         logger.warn(
           {
             event: "provider.request.failed",
+            ...correlation,
             failure_stage: "provider_transport",
             failure_kind: "provider_unavailable",
             ...safeError(
@@ -696,6 +706,7 @@ export function createOpenAiCompatibleReceiptExtractor(
           logger.warn(
             {
               event: "provider.request.completed",
+              ...correlation,
               provider_origin: providerOrigin,
               http_status: response.status,
               duration_ms: Math.round(performance.now() - providerStarted),
@@ -726,6 +737,7 @@ export function createOpenAiCompatibleReceiptExtractor(
           logger.warn(
             {
               event: "provider.response.failed",
+              ...correlation,
               failure_stage: "provider_response_size",
               failure_kind: "malformed_response",
               ...safeError(error),
@@ -744,6 +756,7 @@ export function createOpenAiCompatibleReceiptExtractor(
         ](
           {
             event: "provider.request.completed",
+            ...correlation,
             provider_origin: providerOrigin,
             http_status: response.status,
             duration_ms: providerDuration,
@@ -758,6 +771,7 @@ export function createOpenAiCompatibleReceiptExtractor(
           logger.warn(
             {
               event: "provider.response.validation_failed",
+              ...correlation,
               failure_stage: "provider_envelope_json",
               failure_kind: "malformed_response",
               issue_count: 1,
@@ -786,6 +800,7 @@ export function createOpenAiCompatibleReceiptExtractor(
           logger.warn(
             {
               event: "provider.response.validation_failed",
+              ...correlation,
               failure_stage: "provider_envelope_schema",
               failure_kind: "malformed_response",
               issue_count: parsedEnvelope.error.issues.length,
@@ -817,6 +832,7 @@ export function createOpenAiCompatibleReceiptExtractor(
           logger.warn(
             {
               event: "provider.response.validation_failed",
+              ...correlation,
               failure_stage: "extraction_schema",
               failure_kind: "malformed_response",
               issue_count: parsedExtraction.error.issues.length,

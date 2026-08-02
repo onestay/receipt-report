@@ -36,7 +36,14 @@ export function safeError(error: unknown): LogContext {
 }
 
 export function safeUnexpectedError(error: unknown): LogContext {
-  return safeError(error);
+  const stack =
+    error instanceof Error && typeof error.stack === "string"
+      ? [error.name || "Error", ...error.stack.split("\n").slice(1)].join("\n")
+      : undefined;
+  return {
+    ...safeError(error),
+    ...(stack ? { stack } : {}),
+  };
 }
 
 export function safeProviderOrigin(value: string): string | undefined {

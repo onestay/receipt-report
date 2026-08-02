@@ -511,11 +511,26 @@ describe("OpenAI-compatible adapter", () => {
     const marker = "SENSITIVE_PROVIDER_MARKER";
     const safe = captureLogger();
     const safeUrl = await fakeProvider(() => ({ status: 500, body: marker }));
+    const correlatedRequest = {
+      ...request,
+      jobId: "job-1",
+      attemptId: "attempt-1",
+    };
     const safeError = await adapter(safeUrl, { logger: safe.logger })
-      .extract(request)
+      .extract(correlatedRequest)
       .catch((error: unknown) => error);
     expect(safeError).toMatchObject({ rawProviderOutput: marker });
     expect(JSON.stringify(safe.events)).not.toContain(marker);
+    expect(safe.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: "provider.request.completed",
+          document_id: request.documentId,
+          job_id: "job-1",
+          attempt_id: "attempt-1",
+        }),
+      ]),
+    );
 
     await new Promise<void>((resolve) => server?.close(() => resolve()));
     server = undefined;

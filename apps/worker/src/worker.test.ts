@@ -9,6 +9,7 @@ import {
 } from "@receipt-report/database";
 import { startWorker } from "./worker.js";
 import { ReceiptExtractionError } from "@receipt-report/receipt-ai";
+import type { Logger } from "@receipt-report/logging";
 
 let directory: string | undefined;
 
@@ -18,6 +19,19 @@ afterEach(async () => {
 
 describe("worker lifecycle", () => {
   it("creates readiness after initialization and cleans up idempotently", async () => {
+    const logRecords: Record<string, unknown>[] = [];
+    const record = (fields: Record<string, unknown>) => logRecords.push(fields);
+    const logger = {
+      trace: record,
+      debug: record,
+      info: record,
+      warn: record,
+      error: record,
+      fatal: record,
+      child() {
+        return this;
+      },
+    } as unknown as Logger;
     directory = await mkdtemp(
       join(tmpdir(), `receipt-report-worker-unit-${process.pid}-`),
     );
@@ -84,6 +98,8 @@ describe("worker lifecycle", () => {
         NORMALIZATION_POLL_MS: "1",
       },
       { render },
+      undefined,
+      logger,
     );
     expect(await readFile(readyFile, "utf8")).toMatch(/^\d+\n$/);
     expect(await seedStorage.exists(orphanedPath)).toBe(false);
@@ -109,6 +125,21 @@ describe("worker lifecycle", () => {
     await worker.stop();
     await worker.stop();
     await expect(access(readyFile)).rejects.toThrow();
+    expect(logRecords).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ event: "worker.ready" }),
+        expect.objectContaining({
+          event: "normalization.job.published",
+          document_id: document.id,
+        }),
+        expect.objectContaining({
+          event: "extraction.attempt.published",
+          document_id: document.id,
+        }),
+        expect.objectContaining({ event: "worker.shutdown.completed" }),
+      ]),
+    );
+    expect(JSON.stringify(logRecords)).not.toContain("Worker lifecycle");
   });
 
   it("rejects a lease that cannot cover the provider timeout", async () => {

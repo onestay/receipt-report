@@ -15,7 +15,12 @@ import {
   type ProposalFinding,
   type ExtractionCategoryOption,
 } from "@receipt-report/receipt-ai";
-import { silentLogger, type Logger } from "@receipt-report/logging";
+import {
+  safeError,
+  safeUnexpectedError,
+  silentLogger,
+  type Logger,
+} from "@receipt-report/logging";
 
 type ExtractionProcessorConfig = WorkerConfig & ReceiptAiConfig;
 
@@ -203,7 +208,8 @@ export class ExtractionProcessor {
     const job = await this.claim();
     if (!job) return false;
     const startedAt = this.clock();
-    let failureStage: "storage_read" | "provider" | "proposal_build" =
+    let failureStage:
+      "storage_read" | "provider" | "proposal_build" | "publish_database" =
       "storage_read";
     this.logger.info(
       {
@@ -245,7 +251,11 @@ export class ExtractionProcessor {
         document.pages.map(async (page, index) => ({
           position: index,
           mediaType: page.mediaType as "image/png" | "image/jpeg",
-          bytes: new Uint8Array(await this.storage.read(page.relativePath)),
+          bytes: new Uint8Array(
+            await this.storageOperation("read", job, () =>
+              this.storage.read(page.relativePath),
+            ),
+          ),
         })),
       );
       const categoryContext = await this.categoryContext();
@@ -259,11 +269,19 @@ export class ExtractionProcessor {
       failureStage = "provider";
       const result = await this.extractor.extract({
         documentId: job.documentId,
+        jobId: job.id,
+        attemptId: job.attemptId,
         pages,
         categoryOptions: categoryContext.options,
       });
       failureStage = "proposal_build";
-      await this.publish(job, result, startedAt, categoryContext.omitted);
+      const built = await this.buildPublishedProposal(
+        job,
+        result,
+        categoryContext.omitted,
+      );
+      failureStage = "publish_database";
+      await this.publish(job, result, startedAt, built);
     } catch (error) {
       if (!(error instanceof ReceiptExtractionError))
         this.logger.error(
@@ -273,6 +291,7 @@ export class ExtractionProcessor {
             attempt_id: job.attemptId,
             document_id: job.documentId,
             failure_stage: failureStage,
+            ...safeUnexpectedError(error),
           },
           "Extraction operation failed",
         );
@@ -294,13 +313,50 @@ export class ExtractionProcessor {
     return Math.max(0, this.clock().getTime() - startedAt.getTime());
   }
 
-  private async publish(
+  private async storageOperation<T>(
+    operation: "read",
+    job: ClaimedExtractionJob,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    const started = performance.now();
+    try {
+      const result = await run();
+      const duration = Math.round(performance.now() - started);
+      if (duration >= this.config.LOG_SLOW_OPERATION_MS)
+        this.logger.warn(
+          {
+            event: "storage.operation.slow",
+            operation,
+            job_id: job.id,
+            attempt_id: job.attemptId,
+            document_id: job.documentId,
+            duration_ms: duration,
+          },
+          "Storage operation was slow",
+        );
+      return result;
+    } catch (error) {
+      this.logger.error(
+        {
+          event: "storage.operation.failed",
+          operation,
+          job_id: job.id,
+          attempt_id: job.attemptId,
+          document_id: job.documentId,
+          duration_ms: Math.round(performance.now() - started),
+          ...safeError(error),
+        },
+        "Storage operation failed",
+      );
+      throw error;
+    }
+  }
+
+  private async buildPublishedProposal(
     job: ClaimedExtractionJob,
     result: Awaited<ReturnType<ReceiptExtractor["extract"]>>,
-    startedAt: Date,
     categoryContextOmitted: boolean,
-  ): Promise<void> {
-    const now = this.clock();
+  ) {
     const built = await this.buildProposal(
       job.documentId,
       result.structured,
@@ -313,22 +369,35 @@ export class ExtractionProcessor {
         ).categoryOptionSnapshot ?? "[]",
       ) as ExtractionCategoryOption[],
     );
+    return {
+      proposal: built.proposal,
+      findings: [
+        ...validateProposal(built.proposal),
+        ...built.findings,
+        ...(categoryContextOmitted
+          ? [
+              {
+                code: "model_category_context_omitted",
+                severity: "info" as const,
+                fieldPath: null,
+                message:
+                  "Category context was omitted because it exceeded provider bounds",
+              },
+            ]
+          : []),
+      ],
+    };
+  }
+
+  private async publish(
+    job: ClaimedExtractionJob,
+    result: Awaited<ReturnType<ReceiptExtractor["extract"]>>,
+    startedAt: Date,
+    built: Awaited<ReturnType<ExtractionProcessor["buildPublishedProposal"]>>,
+  ): Promise<void> {
+    const now = this.clock();
     const proposal = built.proposal;
-    const findings = [
-      ...validateProposal(proposal),
-      ...built.findings,
-      ...(categoryContextOmitted
-        ? [
-            {
-              code: "model_category_context_omitted",
-              severity: "info" as const,
-              fieldPath: null,
-              message:
-                "Category context was omitted because it exceeded provider bounds",
-            },
-          ]
-        : []),
-    ];
+    const findings = built.findings;
     await this.database.$transaction(async (transaction) => {
       const currentDocument = await transaction.receiptDocument.findFirst({
         where: {

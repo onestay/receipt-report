@@ -8,6 +8,7 @@ FROM build-base AS api-build
 COPY . .
 RUN pnpm install --frozen-lockfile --filter . --filter @receipt-report/api... --filter @receipt-report/web...
 RUN pnpm --filter @receipt-report/config build \
+    && pnpm --filter @receipt-report/logging build \
     && pnpm --filter @receipt-report/contracts build \
     && pnpm --filter @receipt-report/database build \
     && pnpm --filter @receipt-report/receipt-ai build \
@@ -18,6 +19,7 @@ FROM build-base AS worker-build
 COPY . .
 RUN pnpm install --frozen-lockfile --filter . --filter @receipt-report/worker...
 RUN pnpm --filter @receipt-report/config build \
+    && pnpm --filter @receipt-report/logging build \
     && pnpm --filter @receipt-report/contracts build \
     && pnpm --filter @receipt-report/database build \
     && pnpm --filter @receipt-report/receipt-ai build \

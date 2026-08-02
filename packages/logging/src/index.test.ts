@@ -3,6 +3,7 @@ import {
   requestId,
   safeError,
   safeProviderOrigin,
+  safeUnexpectedError,
   sensitiveBody,
 } from "./index.js";
 
@@ -27,6 +28,18 @@ describe("privacy-safe logging helpers", () => {
       "https://provider.example",
     );
     expect(safeProviderOrigin("file:///secret")).toBeUndefined();
+  });
+
+  it("includes a stack only for unexpected internal errors", () => {
+    const error = new Error("internal marker");
+    expect(safeError(error)).not.toHaveProperty("stack");
+    expect(safeUnexpectedError(error)).toMatchObject({
+      error_class: "Error",
+      stack: expect.stringContaining("index.test.ts"),
+    });
+    expect(JSON.stringify(safeUnexpectedError(error))).not.toContain(
+      "internal marker",
+    );
   });
 
   it("caps and marks explicitly sensitive provider text", () => {
