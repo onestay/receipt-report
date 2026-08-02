@@ -825,7 +825,8 @@ export function AIReviewPanel({
                             ? "model"
                             : "unassigned"}
                   </small>
-                  {proposed?.categoryProvenance === "model" &&
+                  {!categoryTouched.has(index) &&
+                    proposed?.categoryProvenance === "model" &&
                     confidence(proposed.categoryConfidence ?? null)}
                   {categoryTouched.has(index) && line.categoryId && (
                     <button

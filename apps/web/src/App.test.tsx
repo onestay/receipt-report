@@ -82,6 +82,7 @@ describe("application shell", () => {
         clearedModelCategories: 0,
         exactRuleCategories: 0,
         unassignedCategories: 0,
+        manualCategories: 0,
         correctionRate: 0.25,
       },
       buckets: [
@@ -100,6 +101,7 @@ describe("application shell", () => {
           clearedModelCategories: 0,
           exactRuleCategories: 0,
           unassignedCategories: 0,
+          manualCategories: 0,
           correctionRate: 1,
         },
       ],

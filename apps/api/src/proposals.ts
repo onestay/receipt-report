@@ -54,6 +54,7 @@ export function categoryQualityOutcome(
   | "cleared_model"
   | "exact_rule"
   | "unassigned"
+  | "manual"
   | null {
   if (provenance === "model") {
     if (accepted === null) return "cleared_model";
@@ -62,7 +63,7 @@ export function categoryQualityOutcome(
       : "corrected_model";
   }
   if (provenance === "exact_rule" && accepted !== null) return "exact_rule";
-  return accepted === null ? "unassigned" : null;
+  return accepted === null ? "unassigned" : "manual";
 }
 
 export class ProposalRepository {
@@ -281,7 +282,7 @@ export class ProposalRepository {
           proposedValue: JSON.stringify(comparison.proposed),
           acceptedValue: JSON.stringify(comparison.accepted),
           originalCategoryProvenance:
-            comparison.fieldKind === "categoryId" &&
+            comparison.fieldKind === "lineItem.categoryId" &&
             comparison.sourcePosition !== null
               ? (original.lineItems[comparison.sourcePosition]
                   ?.categoryProvenance ?? null)
@@ -336,6 +337,7 @@ export class ProposalRepository {
       clearedModelCategories: number;
       exactRuleCategories: number;
       unassignedCategories: number;
+      manualCategories: number;
     };
     const blank = (): Counts => ({
       proposedFields: 0,
@@ -348,6 +350,7 @@ export class ProposalRepository {
       clearedModelCategories: 0,
       exactRuleCategories: 0,
       unassignedCategories: 0,
+      manualCategories: 0,
     });
     const increment = (counts: Counts, event: (typeof events)[number]) => {
       const kind = event.correctionKind;
@@ -356,7 +359,7 @@ export class ProposalRepository {
       else counts.changedFields++;
       if (kind === "missing_filled") counts.missingFilled++;
       if (kind === "value_removed") counts.modelValuesRemoved++;
-      if (event.fieldKind !== "categoryId") return;
+      if (event.fieldKind !== "lineItem.categoryId") return;
       const accepted = JSON.parse(event.acceptedValue) as string | null;
       const outcome = categoryQualityOutcome(
         event.originalCategoryProvenance,
@@ -368,6 +371,7 @@ export class ProposalRepository {
       else if (outcome === "cleared_model") counts.clearedModelCategories++;
       else if (outcome === "exact_rule") counts.exactRuleCategories++;
       else if (outcome === "unassigned") counts.unassignedCategories++;
+      else if (outcome === "manual") counts.manualCategories++;
     };
     const totals = blank();
     const grouped = new Map<string, Counts>();

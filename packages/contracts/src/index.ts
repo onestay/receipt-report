@@ -747,6 +747,7 @@ export const correctionQualityBucketSchema = z.object({
   clearedModelCategories: z.number().int().nonnegative(),
   exactRuleCategories: z.number().int().nonnegative(),
   unassignedCategories: z.number().int().nonnegative(),
+  manualCategories: z.number().int().nonnegative(),
   correctionRate: z.number().min(0).max(1),
 });
 export const correctionQualitySummarySchema = z.object({

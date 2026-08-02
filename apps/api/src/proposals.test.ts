@@ -135,7 +135,7 @@ describe("proposal API", () => {
     ["model", "value_removed", null, "cleared_model"],
     ["exact_rule", "missing_filled", "category", "exact_rule"],
     [null, "unchanged", null, "unassigned"],
-    ["manual", "changed", "category", null],
+    ["manual", "changed", "category", "manual"],
   ])(
     "classifies category feedback as %s",
     (provenance, correctionKind, accepted, expected) => {
@@ -287,6 +287,51 @@ describe("proposal API", () => {
     expect(unfiltered.body.totals).toMatchObject({
       proposedFields: events.length,
       modelValuesRemoved: 1,
+    });
+  });
+
+  it("accounts for model-prefilled categories through real approval", async () => {
+    const category = await database.category.create({
+      data: {
+        name: "Synthetic model category",
+        normalizedName: "synthetic model category",
+        position: 950,
+      },
+    });
+    const proposed = snapshot();
+    const line = proposed.lineItems[0];
+    if (!line) throw new Error("Missing line fixture");
+    line.categoryId = category.id;
+    line.categoryProvenance = "model";
+    line.categoryConfidence = 0.9;
+    const seeded = await seed(proposed);
+
+    await request(app())
+      .post(
+        `/api/v1/receipts/${seeded.receipt.id}/extraction-proposals/${seeded.proposal.id}/approve`,
+      )
+      .send({
+        receiptUpdatedAt: seeded.receipt.updatedAt.toISOString(),
+        normalizationRevision: "revision-1",
+        snapshot: proposed,
+        acknowledgedWarningCodes: [],
+      })
+      .expect(200);
+
+    await expect(
+      database.correctionEvent.findFirstOrThrow({
+        where: {
+          proposalId: seeded.proposal.id,
+          fieldKind: "lineItem.categoryId",
+          sourcePosition: 0,
+        },
+      }),
+    ).resolves.toMatchObject({ originalCategoryProvenance: "model" });
+    const quality = await request(app())
+      .get("/api/v1/extraction-quality")
+      .expect(200);
+    expect(quality.body.totals).toMatchObject({
+      acceptedModelCategories: 1,
     });
   });
 
