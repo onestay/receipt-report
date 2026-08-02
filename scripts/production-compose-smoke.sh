@@ -69,7 +69,7 @@ receipt_id="$(node scripts/compose-normalization-smoke.mjs "$base_url")"
 curl --silent --output /dev/null -X POST -H 'content-type: application/json' \
   --data '{"merchantRaw":"COMPOSE_SECRET_MARKER"}' \
   "$base_url/api/v1/receipts"
-assert_json_logs api "http.request.completed"
+assert_json_logs api "api.request.completed"
 assert_json_logs worker "normalization.job.published"
 docker compose -f "$COMPOSE_FILE" restart api worker
 wait_for_services
