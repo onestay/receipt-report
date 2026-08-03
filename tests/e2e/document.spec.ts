@@ -47,6 +47,9 @@ test("uploads, reviews, replaces, and protects extraction history", async ({
   page,
 }) => {
   await page.goto("/receipts/new");
+  await page
+    .getByRole("button", { name: "Enter receipt manually instead" })
+    .click();
   await page.getByLabel("Merchant").fill("Synthetic Document Browser");
   await page.getByLabel("Purchase date").fill("2026-07-21");
   await page.getByLabel("Total").fill("1,00");

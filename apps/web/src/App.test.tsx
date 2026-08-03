@@ -38,6 +38,7 @@ function stubAppFetch(
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => Response | Promise<Response>,
+  handleDocumentGet = false,
 ) {
   const routed = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -51,7 +52,11 @@ function stubAppFetch(
       return Promise.resolve(
         new Response(JSON.stringify({ suggestion: null }), { status: 200 }),
       );
-    if (/\/api\/v1\/receipts\/[^/]+\/document$/.test(url) && !init?.method)
+    if (
+      !handleDocumentGet &&
+      /\/api\/v1\/receipts\/[^/]+\/document$/.test(url) &&
+      !init?.method
+    )
       return Promise.resolve(new Response(null, { status: 404 }));
     return receiptFetch(input, init);
   });
@@ -294,6 +299,9 @@ describe("application shell", () => {
     );
     stubAppFetch(fetchMock);
     render(<App />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Enter receipt manually instead" }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Save receipt" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("review");
     fireEvent.change(screen.getByLabelText("Merchant"), {
@@ -316,6 +324,249 @@ describe("application shell", () => {
     expect(
       await screen.findByRole("heading", { name: "Could not open receipt" }),
     ).toBeInTheDocument();
+  });
+
+  it("creates and starts processing a receipt from only an uploaded file", async () => {
+    history.replaceState({}, "", "/receipts/new");
+    const created = {
+      id: "cm12345678901234567890123",
+      merchantRaw: "Pending AI extraction",
+      merchantBrand: null,
+      merchantStore: null,
+      purchaseDate: "2026-08-03",
+      purchaseTime: null,
+      currency: "EUR",
+      notes: null,
+      totalCents: 0,
+      createdAt: "2026-08-03T00:00:00.000Z",
+      updatedAt: "2026-08-03T00:00:00.000Z",
+      lineItems: [],
+    };
+    const receiptFetch = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === "/api/v1/receipts" && init?.method === "POST")
+          return new Response(JSON.stringify(created), { status: 201 });
+        if (url.endsWith("/document") && init?.method === "POST")
+          return new Response(
+            JSON.stringify({
+              id: "cm22345678901234567890123",
+              receiptId: created.id,
+              originalFilename: "receipt.pdf",
+              mediaType: "application/pdf",
+              byteSize: 3,
+              sha256: "a".repeat(64),
+              createdAt: created.createdAt,
+              updatedAt: created.updatedAt,
+              normalizationStatus: "pending",
+              normalizationRevision: null,
+              normalizationError: null,
+              normalizationProfileVersion: null,
+              normalizationRenderer: null,
+              normalizationRequestedAt: created.createdAt,
+              normalizationStartedAt: null,
+              normalizationCompletedAt: null,
+              originalUrl: `/api/v1/receipts/${created.id}/document/original`,
+              pages: [],
+            }),
+            { status: 201 },
+          );
+        if (url === `/api/v1/receipts/${created.id}`)
+          return new Response(JSON.stringify(created));
+        throw new Error(`Unexpected request: ${url}`);
+      },
+    );
+    stubAppFetch(receiptFetch);
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Upload receipt" }));
+    expect(
+      await screen.findByText("Choose a receipt image or PDF."),
+    ).toBeVisible();
+
+    fireEvent.change(screen.getByLabelText(/Choose or drop/), {
+      target: {
+        files: [new File(["pdf"], "receipt.pdf", { type: "application/pdf" })],
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Upload receipt" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Edit receipt" }),
+    ).toBeVisible();
+    const createCall = receiptFetch.mock.calls.find(
+      ([input, init]) =>
+        String(input) === "/api/v1/receipts" && init?.method === "POST",
+    );
+    expect(JSON.parse(String(createCall?.[1]?.body))).toMatchObject({
+      merchantRaw: "Pending AI extraction",
+      purchaseTime: null,
+      totalCents: 0,
+    });
+  });
+
+  it("removes an upload-only placeholder after a definitive rejection", async () => {
+    history.replaceState({}, "", "/receipts/new");
+    const created = {
+      id: "cm12345678901234567890123",
+      merchantRaw: "Pending AI extraction",
+      merchantBrand: null,
+      merchantStore: null,
+      purchaseDate: "2026-08-03",
+      purchaseTime: null,
+      currency: "EUR",
+      notes: null,
+      totalCents: 0,
+      createdAt: "2026-08-03T00:00:00.000Z",
+      updatedAt: "2026-08-03T00:00:00.000Z",
+      lineItems: [],
+    };
+    const receiptFetch = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === "/api/v1/receipts" && init?.method === "POST")
+          return new Response(JSON.stringify(created), { status: 201 });
+        if (url.endsWith("/document") && init?.method === "POST")
+          return new Response(
+            JSON.stringify({
+              error: { code: "malformed_document", message: "bad" },
+            }),
+            { status: 422 },
+          );
+        if (
+          url === `/api/v1/receipts/${created.id}` &&
+          init?.method === "DELETE"
+        )
+          return new Response(null, { status: 204 });
+        throw new Error(`Unexpected request: ${url}`);
+      },
+    );
+    stubAppFetch(receiptFetch, true);
+    render(<App />);
+    fireEvent.change(screen.getByLabelText(/Choose or drop/), {
+      target: {
+        files: [new File(["bad"], "receipt.pdf", { type: "application/pdf" })],
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Upload receipt" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("malformed");
+    expect(
+      screen.queryByText("Open the saved receipt"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Upload receipt" }),
+    ).toBeEnabled();
+    expect(receiptFetch).toHaveBeenCalledWith(
+      `/api/v1/receipts/${created.id}`,
+      { method: "DELETE" },
+    );
+  });
+
+  it("reconciles an uploaded document after an invalid confirmation", async () => {
+    history.replaceState({}, "", "/receipts/new");
+    const created = {
+      id: "cm12345678901234567890123",
+      merchantRaw: "Pending AI extraction",
+      merchantBrand: null,
+      merchantStore: null,
+      purchaseDate: "2026-08-03",
+      purchaseTime: null,
+      currency: "EUR",
+      notes: null,
+      totalCents: 0,
+      createdAt: "2026-08-03T00:00:00.000Z",
+      updatedAt: "2026-08-03T00:00:00.000Z",
+      lineItems: [],
+    };
+    const document = {
+      id: "cm22345678901234567890123",
+      receiptId: created.id,
+      originalFilename: "receipt.pdf",
+      mediaType: "application/pdf",
+      byteSize: 3,
+      sha256: "a".repeat(64),
+      createdAt: created.createdAt,
+      updatedAt: created.updatedAt,
+      normalizationStatus: "pending",
+      normalizationRevision: null,
+      normalizationError: null,
+      normalizationProfileVersion: null,
+      normalizationRenderer: null,
+      normalizationRequestedAt: created.createdAt,
+      normalizationStartedAt: null,
+      normalizationCompletedAt: null,
+      originalUrl: `/api/v1/receipts/${created.id}/document/original`,
+      pages: [],
+    };
+    let documentReads = 0;
+    const receiptFetch = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === "/api/v1/receipts" && init?.method === "POST")
+          return new Response(JSON.stringify(created), { status: 201 });
+        if (url.endsWith("/document") && init?.method === "POST")
+          return new Response("{}", { status: 201 });
+        if (url.endsWith("/document") && !init?.method) {
+          documentReads += 1;
+          return new Response(JSON.stringify(document));
+        }
+        if (url === `/api/v1/receipts/${created.id}`)
+          return new Response(JSON.stringify(created));
+        throw new Error(`Unexpected request: ${url}`);
+      },
+    );
+    stubAppFetch(receiptFetch, true);
+    render(<App />);
+    fireEvent.change(screen.getByLabelText(/Choose or drop/), {
+      target: {
+        files: [new File(["pdf"], "receipt.pdf", { type: "application/pdf" })],
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Upload receipt" }));
+    expect(
+      await screen.findByRole("heading", { name: "Edit receipt" }),
+    ).toBeVisible();
+    expect(documentReads).toBeGreaterThanOrEqual(1);
+  });
+
+  it("preserves manual draft fields across capture mode switches", () => {
+    history.replaceState({}, "", "/receipts/new");
+    stubAppFetch(vi.fn());
+    render(<App />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Enter receipt manually instead" }),
+    );
+    fireEvent.change(screen.getByLabelText("Merchant"), {
+      target: { value: "Draft shop" },
+    });
+    fireEvent.change(screen.getByLabelText("Purchase date"), {
+      target: { value: "2026-08-02" },
+    });
+    fireEvent.change(screen.getByLabelText("Total"), {
+      target: { value: "4,20" },
+    });
+    fireEvent.change(screen.getByLabelText(/Notes/), {
+      target: { value: "Draft note" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Use AI upload only" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Enter receipt manually instead" }),
+    );
+    expect(screen.getByLabelText("Merchant")).toHaveValue("Draft shop");
+    expect(screen.getByLabelText("Purchase date")).toHaveValue("2026-08-02");
+    expect(screen.getByLabelText("Total")).toHaveValue("4,20");
+    expect(screen.getByLabelText(/Notes/)).toHaveValue("Draft note");
+  });
+
+  it("connects the required document error to the file input", async () => {
+    history.replaceState({}, "", "/receipts/new");
+    stubAppFetch(vi.fn());
+    render(<App />);
+    const input = screen.getByLabelText(/Choose or drop/);
+    expect(input).toHaveAttribute("aria-required", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Upload receipt" }));
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(input).toHaveAccessibleDescription("Choose a receipt image or PDF.");
   });
 
   it("creates once, preserves fields, and retries a failed document upload", async () => {
@@ -378,6 +629,9 @@ describe("application shell", () => {
     );
     stubAppFetch(receiptFetch);
     render(<App />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Enter receipt manually instead" }),
+    );
     fireEvent.change(screen.getByLabelText("Merchant"), {
       target: { value: created.merchantRaw },
     });
@@ -454,6 +708,9 @@ describe("application shell", () => {
     });
     stubAppFetch(fetchMock);
     render(<App />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Enter receipt manually instead" }),
+    );
     const brandSelect = screen.getByLabelText("Brand");
     fireEvent.focus(brandSelect);
     await screen.findByRole("option", { name: "EDEKA" });
@@ -496,6 +753,9 @@ describe("application shell", () => {
     );
     stubAppFetch(fetchMock);
     render(<App />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Enter receipt manually instead" }),
+    );
     fireEvent.change(screen.getByLabelText("Merchant"), {
       target: { value: "REWE Markt 42" },
     });
@@ -530,6 +790,9 @@ describe("application shell", () => {
     history.replaceState({}, "", "/receipts/new");
     stubAppFetch(vi.fn().mockResolvedValue(response));
     render(<App />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Enter receipt manually instead" }),
+    );
     fireEvent.change(screen.getByLabelText("Merchant"), {
       target: { value: "Synthetic" },
     });
@@ -548,6 +811,9 @@ describe("application shell", () => {
     history.replaceState({}, "", "/receipts/new");
     stubAppFetch(vi.fn().mockRejectedValue(new TypeError("raw failure")));
     render(<App />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Enter receipt manually instead" }),
+    );
     fireEvent.change(screen.getByLabelText("Merchant"), {
       target: { value: "Synthetic" },
     });
@@ -583,7 +849,7 @@ describe("application shell", () => {
     );
     render(<App />);
     fireEvent.click(screen.getByRole("link", { name: "New receipt" }));
-    expect(screen.getByLabelText("Merchant")).toHaveFocus();
+    expect(screen.getByRole("heading", { name: "New receipt" })).toHaveFocus();
     fireEvent.click(screen.getByRole("link", { name: "Ledger" }));
     expect(
       screen.getByRole("heading", { name: "Purchases, clearly kept." }),
