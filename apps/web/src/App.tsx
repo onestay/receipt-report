@@ -900,6 +900,7 @@ export function MerchantIdentity({
 
 function CreateReceipt() {
   const [submitting, setSubmitting] = useState(false);
+  const [manualEntry, setManualEntry] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [serverError, setServerError] = useState("");
   const [documentFile, setDocumentFile] = useState<File | null>(null);
@@ -918,10 +919,14 @@ function CreateReceipt() {
     const purchaseDate = String(data.get("purchaseDate") ?? "");
     const total = parseMoney(String(data.get("total") ?? ""));
     const next: Record<string, string> = {};
-    if (!merchantRaw) next.merchantRaw = "Enter a merchant.";
-    if (!purchaseDate) next.purchaseDate = "Choose a purchase date.";
-    if (total === null)
-      next.total = "Enter euros with up to two decimal places.";
+    if (!manualEntry && !documentFile)
+      next.document = "Choose a receipt image or PDF.";
+    if (manualEntry) {
+      if (!merchantRaw) next.merchantRaw = "Enter a merchant.";
+      if (!purchaseDate) next.purchaseDate = "Choose a purchase date.";
+      if (total === null)
+        next.total = "Enter euros with up to two decimal places.";
+    }
     setErrors(next);
     if (Object.keys(next).length) {
       document.querySelector<HTMLElement>(".validation-summary")?.focus();
@@ -931,12 +936,18 @@ function CreateReceipt() {
     setServerError("");
     try {
       const body = {
-        merchantRaw,
-        ...merchantIdentity,
-        purchaseDate,
-        purchaseTime: String(data.get("purchaseTime") || "") || null,
-        totalCents: total,
-        notes: String(data.get("notes") || "") || null,
+        merchantRaw: manualEntry ? merchantRaw : "Pending AI extraction",
+        ...(manualEntry
+          ? merchantIdentity
+          : { merchantBrandId: null, merchantStoreId: null }),
+        purchaseDate: manualEntry
+          ? purchaseDate
+          : new Date().toISOString().slice(0, 10),
+        purchaseTime: manualEntry
+          ? String(data.get("purchaseTime") || "") || null
+          : null,
+        totalCents: manualEntry ? total : 0,
+        notes: manualEntry ? String(data.get("notes") || "") || null : null,
       };
       let receiptId = createdReceiptId;
       if (!receiptId) {
@@ -997,10 +1008,11 @@ function CreateReceipt() {
       <div className="breadcrumb">
         <Link href="/receipts">← Ledger</Link>
       </div>
-      <p className="eyebrow">Manual entry</p>
+      <p className="eyebrow">AI-assisted capture</p>
       <h1>New receipt</h1>
       <p className="intro">
-        Capture the essentials now. You can add line items on the next screen.
+        Upload a receipt image or PDF. AI will extract the merchant, date,
+        total, and line items for you to review.
       </p>
       {Object.keys(errors).length > 0 && (
         <div
@@ -1030,86 +1042,121 @@ function CreateReceipt() {
         noValidate
       >
         <div className="field field--wide">
-          <label htmlFor="merchantRaw">Merchant</label>
-          <input
-            id="merchantRaw"
-            name="merchantRaw"
-            autoFocus
-            aria-invalid={!!errors.merchantRaw}
-            aria-describedby={
-              errors.merchantRaw ? "merchantRaw-error" : undefined
-            }
-          />
-          {errors.merchantRaw && (
-            <small id="merchantRaw-error" className="field-error">
-              {errors.merchantRaw}
-            </small>
-          )}
-        </div>
-        <MerchantIdentity
-          value={merchantIdentity}
-          onChange={setMerchantIdentity}
-        />
-        <div className="field">
-          <label htmlFor="purchaseDate">Purchase date</label>
-          <input
-            id="purchaseDate"
-            name="purchaseDate"
-            type="date"
-            aria-invalid={!!errors.purchaseDate}
-            aria-describedby={
-              errors.purchaseDate ? "purchaseDate-error" : undefined
-            }
-          />
-          {errors.purchaseDate && (
-            <small id="purchaseDate-error" className="field-error">
-              {errors.purchaseDate}
-            </small>
-          )}
-        </div>
-        <div className="field">
-          <label htmlFor="purchaseTime">
-            Time <span>optional</span>
-          </label>
-          <input id="purchaseTime" name="purchaseTime" type="time" />
-        </div>
-        <div className="field">
-          <label htmlFor="total">Total</label>
-          <div className="money-input">
-            <span>€</span>
-            <input
-              id="total"
-              name="total"
-              inputMode="decimal"
-              placeholder="0,00"
-              aria-invalid={!!errors.total}
-              aria-describedby={errors.total ? "total-error" : undefined}
-            />
-          </div>
-          {errors.total && (
-            <small id="total-error" className="field-error">
-              {errors.total}
-            </small>
-          )}
-        </div>
-        <div className="field field--wide">
-          <label htmlFor="notes">
-            Notes <span>optional</span>
-          </label>
-          <textarea id="notes" name="notes" rows={4} />
-        </div>
-        <div className="field field--wide">
           <span className="field-label">
-            Receipt document <span>optional</span>
+            Receipt document {!manualEntry && <span>required</span>}
           </span>
           <DocumentFileField
             id="new-receipt-document"
             file={documentFile}
             disabled={submitting}
-            onFile={setDocumentFile}
+            onFile={(file) => {
+              setDocumentFile(file);
+              if (file)
+                setErrors((current) => {
+                  const next = { ...current };
+                  delete next.document;
+                  return next;
+                });
+            }}
             onError={setServerError}
           />
+          {errors.document && (
+            <small className="field-error">{errors.document}</small>
+          )}
         </div>
+        {!manualEntry && (
+          <div className="field field--wide">
+            <button
+              type="button"
+              className="button button--quiet"
+              onClick={() => setManualEntry(true)}
+            >
+              Enter receipt manually instead
+            </button>
+          </div>
+        )}
+        {manualEntry && (
+          <>
+            <div className="field field--wide">
+              <label htmlFor="merchantRaw">Merchant</label>
+              <input
+                id="merchantRaw"
+                name="merchantRaw"
+                autoFocus
+                aria-invalid={!!errors.merchantRaw}
+                aria-describedby={
+                  errors.merchantRaw ? "merchantRaw-error" : undefined
+                }
+              />
+              {errors.merchantRaw && (
+                <small id="merchantRaw-error" className="field-error">
+                  {errors.merchantRaw}
+                </small>
+              )}
+            </div>
+            <MerchantIdentity
+              value={merchantIdentity}
+              onChange={setMerchantIdentity}
+            />
+            <div className="field">
+              <label htmlFor="purchaseDate">Purchase date</label>
+              <input
+                id="purchaseDate"
+                name="purchaseDate"
+                type="date"
+                aria-invalid={!!errors.purchaseDate}
+                aria-describedby={
+                  errors.purchaseDate ? "purchaseDate-error" : undefined
+                }
+              />
+              {errors.purchaseDate && (
+                <small id="purchaseDate-error" className="field-error">
+                  {errors.purchaseDate}
+                </small>
+              )}
+            </div>
+            <div className="field">
+              <label htmlFor="purchaseTime">
+                Time <span>optional</span>
+              </label>
+              <input id="purchaseTime" name="purchaseTime" type="time" />
+            </div>
+            <div className="field">
+              <label htmlFor="total">Total</label>
+              <div className="money-input">
+                <span>€</span>
+                <input
+                  id="total"
+                  name="total"
+                  inputMode="decimal"
+                  placeholder="0,00"
+                  aria-invalid={!!errors.total}
+                  aria-describedby={errors.total ? "total-error" : undefined}
+                />
+              </div>
+              {errors.total && (
+                <small id="total-error" className="field-error">
+                  {errors.total}
+                </small>
+              )}
+            </div>
+            <div className="field field--wide">
+              <label htmlFor="notes">
+                Notes <span>optional</span>
+              </label>
+              <textarea id="notes" name="notes" rows={4} />
+            </div>
+            <div className="field field--wide">
+              <button
+                type="button"
+                className="button button--quiet"
+                onClick={() => setManualEntry(false)}
+              >
+                Use AI upload only
+              </button>
+            </div>
+          </>
+        )}
         {submitting && documentFile && createdReceiptId && (
           <div className="field field--wide upload-progress">
             <progress aria-label="Uploading document" />
@@ -1137,7 +1184,9 @@ function CreateReceipt() {
                 : "Saving…"
               : createdReceiptId
                 ? "Retry upload"
-                : "Save receipt"}
+                : manualEntry
+                  ? "Save receipt"
+                  : "Upload receipt"}
           </button>
         </div>
       </form>

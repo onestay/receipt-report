@@ -294,6 +294,9 @@ describe("application shell", () => {
     );
     stubAppFetch(fetchMock);
     render(<App />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Enter receipt manually instead" }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Save receipt" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("review");
     fireEvent.change(screen.getByLabelText("Merchant"), {
@@ -316,6 +319,85 @@ describe("application shell", () => {
     expect(
       await screen.findByRole("heading", { name: "Could not open receipt" }),
     ).toBeInTheDocument();
+  });
+
+  it("creates and starts processing a receipt from only an uploaded file", async () => {
+    history.replaceState({}, "", "/receipts/new");
+    const created = {
+      id: "cm12345678901234567890123",
+      merchantRaw: "Pending AI extraction",
+      merchantBrand: null,
+      merchantStore: null,
+      purchaseDate: "2026-08-03",
+      purchaseTime: null,
+      currency: "EUR",
+      notes: null,
+      totalCents: 0,
+      createdAt: "2026-08-03T00:00:00.000Z",
+      updatedAt: "2026-08-03T00:00:00.000Z",
+      lineItems: [],
+    };
+    const receiptFetch = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === "/api/v1/receipts" && init?.method === "POST")
+          return new Response(JSON.stringify(created), { status: 201 });
+        if (url.endsWith("/document") && init?.method === "POST")
+          return new Response(
+            JSON.stringify({
+              id: "cm22345678901234567890123",
+              receiptId: created.id,
+              originalFilename: "receipt.pdf",
+              mediaType: "application/pdf",
+              byteSize: 3,
+              sha256: "a".repeat(64),
+              createdAt: created.createdAt,
+              updatedAt: created.updatedAt,
+              normalizationStatus: "pending",
+              normalizationRevision: null,
+              normalizationError: null,
+              normalizationProfileVersion: null,
+              normalizationRenderer: null,
+              normalizationRequestedAt: created.createdAt,
+              normalizationStartedAt: null,
+              normalizationCompletedAt: null,
+              originalUrl: `/api/v1/receipts/${created.id}/document/original`,
+              pages: [],
+            }),
+            { status: 201 },
+          );
+        if (url === `/api/v1/receipts/${created.id}`)
+          return new Response(JSON.stringify(created));
+        throw new Error(`Unexpected request: ${url}`);
+      },
+    );
+    stubAppFetch(receiptFetch);
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Upload receipt" }));
+    expect(
+      await screen.findByText("Choose a receipt image or PDF."),
+    ).toBeVisible();
+
+    fireEvent.change(screen.getByLabelText(/Choose or drop/), {
+      target: {
+        files: [new File(["pdf"], "receipt.pdf", { type: "application/pdf" })],
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Upload receipt" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Edit receipt" }),
+    ).toBeVisible();
+    const createCall = receiptFetch.mock.calls.find(
+      ([input, init]) =>
+        String(input) === "/api/v1/receipts" && init?.method === "POST",
+    );
+    expect(JSON.parse(String(createCall?.[1]?.body))).toMatchObject({
+      merchantRaw: "Pending AI extraction",
+      purchaseTime: null,
+      totalCents: 0,
+    });
   });
 
   it("creates once, preserves fields, and retries a failed document upload", async () => {
@@ -378,6 +460,9 @@ describe("application shell", () => {
     );
     stubAppFetch(receiptFetch);
     render(<App />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Enter receipt manually instead" }),
+    );
     fireEvent.change(screen.getByLabelText("Merchant"), {
       target: { value: created.merchantRaw },
     });
@@ -454,6 +539,9 @@ describe("application shell", () => {
     });
     stubAppFetch(fetchMock);
     render(<App />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Enter receipt manually instead" }),
+    );
     const brandSelect = screen.getByLabelText("Brand");
     fireEvent.focus(brandSelect);
     await screen.findByRole("option", { name: "EDEKA" });
@@ -496,6 +584,9 @@ describe("application shell", () => {
     );
     stubAppFetch(fetchMock);
     render(<App />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Enter receipt manually instead" }),
+    );
     fireEvent.change(screen.getByLabelText("Merchant"), {
       target: { value: "REWE Markt 42" },
     });
@@ -530,6 +621,9 @@ describe("application shell", () => {
     history.replaceState({}, "", "/receipts/new");
     stubAppFetch(vi.fn().mockResolvedValue(response));
     render(<App />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Enter receipt manually instead" }),
+    );
     fireEvent.change(screen.getByLabelText("Merchant"), {
       target: { value: "Synthetic" },
     });
@@ -548,6 +642,9 @@ describe("application shell", () => {
     history.replaceState({}, "", "/receipts/new");
     stubAppFetch(vi.fn().mockRejectedValue(new TypeError("raw failure")));
     render(<App />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Enter receipt manually instead" }),
+    );
     fireEvent.change(screen.getByLabelText("Merchant"), {
       target: { value: "Synthetic" },
     });
@@ -583,7 +680,7 @@ describe("application shell", () => {
     );
     render(<App />);
     fireEvent.click(screen.getByRole("link", { name: "New receipt" }));
-    expect(screen.getByLabelText("Merchant")).toHaveFocus();
+    expect(screen.getByRole("heading", { name: "New receipt" })).toHaveFocus();
     fireEvent.click(screen.getByRole("link", { name: "Ledger" }));
     expect(
       screen.getByRole("heading", { name: "Purchases, clearly kept." }),
