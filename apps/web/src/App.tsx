@@ -10,6 +10,7 @@ import {
   merchantStoreSchema,
   normalizeMerchantAddressKey,
   normalizeMerchantName,
+  receiptDocumentResponseSchema,
   receiptDetailSchema,
   receiptListSchema,
   type MerchantBrand,
@@ -906,6 +907,11 @@ function CreateReceipt() {
   const [documentFile, setDocumentFile] = useState<File | null>(null);
   const [createdReceiptId, setCreatedReceiptId] = useState<string>();
   const [duplicateReceiptId, setDuplicateReceiptId] = useState<string>();
+  const [merchantRaw, setMerchantRaw] = useState("");
+  const [purchaseDate, setPurchaseDate] = useState("");
+  const [purchaseTime, setPurchaseTime] = useState("");
+  const [totalInput, setTotalInput] = useState("");
+  const [notes, setNotes] = useState("");
   const uploadAbort = useRef<AbortController | undefined>(undefined);
   const [merchantIdentity, setMerchantIdentity] =
     useState<MerchantIdentityValue>({
@@ -914,15 +920,13 @@ function CreateReceipt() {
     });
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const data = new FormData(event.currentTarget);
-    const merchantRaw = String(data.get("merchantRaw") ?? "").trim();
-    const purchaseDate = String(data.get("purchaseDate") ?? "");
-    const total = parseMoney(String(data.get("total") ?? ""));
+    const normalizedMerchant = merchantRaw.trim();
+    const total = parseMoney(totalInput);
     const next: Record<string, string> = {};
     if (!manualEntry && !documentFile)
       next.document = "Choose a receipt image or PDF.";
     if (manualEntry) {
-      if (!merchantRaw) next.merchantRaw = "Enter a merchant.";
+      if (!normalizedMerchant) next.merchantRaw = "Enter a merchant.";
       if (!purchaseDate) next.purchaseDate = "Choose a purchase date.";
       if (total === null)
         next.total = "Enter euros with up to two decimal places.";
@@ -936,20 +940,19 @@ function CreateReceipt() {
     setServerError("");
     try {
       const body = {
-        merchantRaw: manualEntry ? merchantRaw : "Pending AI extraction",
+        merchantRaw: manualEntry ? normalizedMerchant : "Pending AI extraction",
         ...(manualEntry
           ? merchantIdentity
           : { merchantBrandId: null, merchantStoreId: null }),
         purchaseDate: manualEntry
           ? purchaseDate
           : new Date().toISOString().slice(0, 10),
-        purchaseTime: manualEntry
-          ? String(data.get("purchaseTime") || "") || null
-          : null,
+        purchaseTime: manualEntry ? purchaseTime || null : null,
         totalCents: manualEntry ? total : 0,
-        notes: manualEntry ? String(data.get("notes") || "") || null : null,
+        notes: manualEntry ? notes || null : null,
       };
       let receiptId = createdReceiptId;
+      let createdForUpload = false;
       if (!receiptId) {
         const response = await fetch("/api/v1/receipts", {
           method: "POST",
@@ -974,6 +977,7 @@ function CreateReceipt() {
         }
         receiptId = created.data.id;
         setCreatedReceiptId(receiptId);
+        createdForUpload = !manualEntry;
       }
       if (documentFile) {
         const controller = new AbortController();
@@ -986,6 +990,42 @@ function CreateReceipt() {
             controller.signal,
           );
         } catch (error) {
+          if (!(error instanceof DocumentUploadError)) {
+            const confirmation = await fetch(
+              `/api/v1/receipts/${receiptId}/document`,
+            ).catch(() => null);
+            if (confirmation?.ok) {
+              const parsed = receiptDocumentResponseSchema.safeParse(
+                await confirmation.json().catch(() => null),
+              );
+              if (parsed.success) {
+                navigate(`/receipts/${receiptId}`);
+                return;
+              }
+            }
+          }
+          const definitive =
+            error instanceof DocumentUploadError &&
+            [
+              "unsupported_document",
+              "document_too_large",
+              "malformed_document",
+              "duplicate_document",
+              "multipart_error",
+              "cancelled",
+            ].includes(error.code);
+          if (createdForUpload && definitive) {
+            const removed = await fetch(`/api/v1/receipts/${receiptId}`, {
+              method: "DELETE",
+            }).catch(() => null);
+            if (removed?.ok) {
+              setCreatedReceiptId(undefined);
+              setServerError(failureMessage(error));
+              if (error instanceof DocumentUploadError)
+                setDuplicateReceiptId(error.duplicateReceiptId);
+              return;
+            }
+          }
           setServerError(`Receipt saved. ${failureMessage(error)}`);
           if (error instanceof DocumentUploadError)
             setDuplicateReceiptId(error.duplicateReceiptId);
@@ -1049,6 +1089,11 @@ function CreateReceipt() {
             id="new-receipt-document"
             file={documentFile}
             disabled={submitting}
+            required={!manualEntry}
+            invalid={!!errors.document}
+            describedBy={
+              errors.document ? "new-receipt-document-error" : undefined
+            }
             onFile={(file) => {
               setDocumentFile(file);
               if (file)
@@ -1061,7 +1106,9 @@ function CreateReceipt() {
             onError={setServerError}
           />
           {errors.document && (
-            <small className="field-error">{errors.document}</small>
+            <small id="new-receipt-document-error" className="field-error">
+              {errors.document}
+            </small>
           )}
         </div>
         {!manualEntry && (
@@ -1083,6 +1130,8 @@ function CreateReceipt() {
                 id="merchantRaw"
                 name="merchantRaw"
                 autoFocus
+                value={merchantRaw}
+                onChange={(event) => setMerchantRaw(event.target.value)}
                 aria-invalid={!!errors.merchantRaw}
                 aria-describedby={
                   errors.merchantRaw ? "merchantRaw-error" : undefined
@@ -1104,6 +1153,8 @@ function CreateReceipt() {
                 id="purchaseDate"
                 name="purchaseDate"
                 type="date"
+                value={purchaseDate}
+                onChange={(event) => setPurchaseDate(event.target.value)}
                 aria-invalid={!!errors.purchaseDate}
                 aria-describedby={
                   errors.purchaseDate ? "purchaseDate-error" : undefined
@@ -1119,7 +1170,13 @@ function CreateReceipt() {
               <label htmlFor="purchaseTime">
                 Time <span>optional</span>
               </label>
-              <input id="purchaseTime" name="purchaseTime" type="time" />
+              <input
+                id="purchaseTime"
+                name="purchaseTime"
+                type="time"
+                value={purchaseTime}
+                onChange={(event) => setPurchaseTime(event.target.value)}
+              />
             </div>
             <div className="field">
               <label htmlFor="total">Total</label>
@@ -1130,6 +1187,8 @@ function CreateReceipt() {
                   name="total"
                   inputMode="decimal"
                   placeholder="0,00"
+                  value={totalInput}
+                  onChange={(event) => setTotalInput(event.target.value)}
                   aria-invalid={!!errors.total}
                   aria-describedby={errors.total ? "total-error" : undefined}
                 />
@@ -1144,7 +1203,13 @@ function CreateReceipt() {
               <label htmlFor="notes">
                 Notes <span>optional</span>
               </label>
-              <textarea id="notes" name="notes" rows={4} />
+              <textarea
+                id="notes"
+                name="notes"
+                rows={4}
+                value={notes}
+                onChange={(event) => setNotes(event.target.value)}
+              />
             </div>
             <div className="field field--wide">
               <button

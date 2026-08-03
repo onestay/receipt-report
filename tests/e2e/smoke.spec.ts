@@ -4,6 +4,9 @@ test("creates, edits, reorders, saves, reloads, and deletes a receipt", async ({
   page,
 }) => {
   await page.goto("/receipts/new");
+  await page
+    .getByRole("button", { name: "Enter receipt manually instead" })
+    .click();
   await page.getByLabel("Merchant").fill("Synthetic Browser Markt");
   await page.getByLabel("Purchase date").fill("2026-07-19");
   await page.getByLabel("Total").fill("3,00");
@@ -46,6 +49,33 @@ test("creates, edits, reorders, saves, reloads, and deletes a receipt", async ({
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Delete" }).click();
   await expect(page).toHaveURL(/\/receipts$/);
+});
+
+test("captures the upload-first receipt form at desktop and mobile sizes", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/receipts/new");
+  await expect(
+    page.getByRole("heading", { name: "New receipt" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Upload receipt" }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: "docs/screenshots/pr-59/upload-first-desktop.png",
+    fullPage: true,
+  });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.reload();
+  await expect(
+    page.getByRole("button", { name: "Upload receipt" }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: "docs/screenshots/pr-59/upload-first-mobile.png",
+    fullPage: true,
+  });
 });
 
 test("mobile editor has no horizontal overflow", async ({ page, request }) => {

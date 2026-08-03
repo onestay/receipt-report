@@ -147,6 +147,9 @@ export function DocumentFileField({
   id,
   file,
   disabled = false,
+  required = false,
+  invalid = false,
+  describedBy,
   inputRef,
   onFile,
   onError,
@@ -154,6 +157,9 @@ export function DocumentFileField({
   id: string;
   file: File | null;
   disabled?: boolean;
+  required?: boolean;
+  invalid?: boolean;
+  describedBy?: string | undefined;
   inputRef?: RefObject<HTMLInputElement | null>;
   onFile: (file: File | null) => void;
   onError: (message: string) => void;
@@ -212,6 +218,9 @@ export function DocumentFileField({
         type="file"
         accept="image/jpeg,image/png,application/pdf,.jpg,.jpeg,.png,.pdf"
         disabled={disabled}
+        aria-required={required}
+        aria-invalid={invalid}
+        aria-describedby={describedBy}
         onChange={(event) => choose(event.target.files?.[0])}
       />
       {file && !disabled && (
