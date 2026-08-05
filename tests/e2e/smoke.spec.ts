@@ -1,5 +1,55 @@
 import { expect, test } from "@playwright/test";
 
+test("shows dense editable line rows without horizontal overflow", async ({
+  page,
+  request,
+}) => {
+  const response = await request.post("/api/v1/receipts", {
+    data: {
+      merchantRaw: "Synthetic Dense Markt",
+      purchaseDate: "2026-08-05",
+      totalCents: 7800,
+      lineItems: Array.from({ length: 12 }, (_, index) => ({
+        description: `Synthetic item ${index + 1}`,
+        quantityMilli: 1000,
+        unitPriceCents: (index + 1) * 100,
+        lineTotalCents: (index + 1) * 100,
+      })),
+    },
+  });
+  const receipt = (await response.json()) as { id: string };
+
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(`/receipts/${receipt.id}`);
+  const table = page.getByRole("table", { name: "Receipt line items" });
+  await table.scrollIntoViewIfNeeded();
+  const rows = table.locator(".line-entry > .line-row");
+  await expect(rows).toHaveCount(12);
+  const visibleRows = await rows.evaluateAll(
+    (elements) =>
+      elements.filter((element) => {
+        const bounds = element.getBoundingClientRect();
+        return bounds.top >= 0 && bounds.bottom <= window.innerHeight;
+      }).length,
+  );
+  expect(visibleRows).toBeGreaterThanOrEqual(8);
+  await page.screenshot({
+    path: "docs/screenshots/pr-64/compact-lines-desktop.png",
+    fullPage: false,
+  });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.reload();
+  await page
+    .getByRole("table", { name: "Receipt line items" })
+    .scrollIntoViewIfNeeded();
+  await expect(page.locator("body")).toHaveJSProperty("scrollWidth", 390);
+  await page.screenshot({
+    path: "docs/screenshots/pr-64/compact-lines-mobile.png",
+    fullPage: false,
+  });
+});
+
 test("creates, edits, reorders, saves, reloads, and deletes a receipt", async ({
   page,
 }) => {
@@ -18,14 +68,20 @@ test("creates, edits, reorders, saves, reloads, and deletes a receipt", async ({
   await expect(saveButton).toBeDisabled();
   await expect(saveButton).toHaveCSS("cursor", "not-allowed");
   await page.getByRole("button", { name: /Add item/ }).click();
-  await page.getByLabel("Description").fill("Synthetic apples");
-  await page.getByLabel("Line total").fill("1,00");
+  await page
+    .getByRole("textbox", { name: "Description", exact: true })
+    .fill("Synthetic apples");
+  await page.getByRole("textbox", { name: "Line total" }).fill("1,00");
   await page.getByRole("button", { name: /Add item/ }).click();
-  await page.getByLabel("Description").nth(1).fill("Synthetic bread");
-  await page.getByLabel("Line total").nth(1).fill("1,50");
+  await page
+    .getByRole("textbox", { name: "Description", exact: true })
+    .nth(1)
+    .fill("Synthetic bread");
+  await page.getByRole("textbox", { name: "Line total" }).nth(1).fill("1,50");
   await expect(
     page.getByRole("status").filter({ hasText: "Difference" }),
   ).toBeVisible();
+  await page.getByRole("button", { name: "Expand details for item 2" }).click();
   await page.getByRole("button", { name: "Move item 2 up" }).click();
   let releaseSave: (() => void) | undefined;
   const saveGate = new Promise<void>((resolve) => {
@@ -43,9 +99,9 @@ test("creates, edits, reorders, saves, reloads, and deletes a receipt", async ({
   releaseSave?.();
   await expect(page.getByText("Receipt saved.")).toBeVisible();
   await page.reload();
-  await expect(page.getByLabel("Description").first()).toHaveValue(
-    "Synthetic bread",
-  );
+  await expect(
+    page.getByRole("textbox", { name: "Description", exact: true }).first(),
+  ).toHaveValue("Synthetic bread");
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Delete" }).click();
   await expect(page).toHaveURL(/\/receipts$/);
@@ -249,6 +305,7 @@ test("remembers, suggests, replaces, and repairs an exact category rule", async 
   await page
     .getByLabel("Category", { exact: true })
     .selectOption(firstCategory.id);
+  await page.getByRole("button", { name: "Expand details for item 1" }).click();
   await page.getByRole("button", { name: "Remember", exact: true }).click();
   await expect(
     page.getByText("Rule remembered for future receipts."),
