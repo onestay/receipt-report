@@ -43,6 +43,12 @@ test("shows dense editable line rows without horizontal overflow", async ({
   await page
     .getByRole("table", { name: "Receipt line items" })
     .scrollIntoViewIfNeeded();
+  const firstSelection = page.getByRole("checkbox", {
+    name: "Item 1",
+    exact: true,
+  });
+  await firstSelection.click();
+  await expect(firstSelection).toBeChecked();
   await expect(page.locator("body")).toHaveJSProperty("scrollWidth", 390);
   await page.screenshot({
     path: "docs/screenshots/pr-64/compact-lines-mobile.png",
@@ -316,6 +322,14 @@ test("remembers, suggests, replaces, and repairs an exact category rule", async 
   await expect(
     page.getByText(`Suggested: ${firstCategory.name} · global`),
   ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Collapse details for item 1" })
+    .click();
+  await page.getByRole("textbox", { name: "Receipt total" }).fill("1,01");
+  await expect(
+    page.getByRole("button", { name: "Expand details for item 1" }),
+  ).toHaveAttribute("aria-expanded", "false");
+  await page.getByRole("button", { name: "Expand details for item 1" }).click();
   await expect(page.getByLabel("Category", { exact: true })).toHaveValue("");
   await page.getByRole("button", { name: "Adopt suggestion" }).click();
   await expect(page.getByLabel("Category", { exact: true })).toHaveValue(

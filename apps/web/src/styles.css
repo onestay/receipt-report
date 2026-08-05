@@ -901,6 +901,8 @@ code {
     grid-column: 1;
     grid-row: 1;
     justify-self: start;
+    position: relative;
+    z-index: 1;
   }
   .line-cell--description {
     grid-column: 1 / 4;

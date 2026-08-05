@@ -2208,9 +2208,10 @@ function ReceiptEditor({ id }: { id: string }) {
                               onStatus={setStatus}
                               onActionable={() => {
                                 if (!userToggledItems.current.has(item.key))
-                                  setExpandedItems((current) =>
-                                    new Set(current).add(item.key),
-                                  );
+                                  setExpandedItems((current) => {
+                                    if (current.has(item.key)) return current;
+                                    return new Set(current).add(item.key);
+                                  });
                               }}
                             />
                           </div>
