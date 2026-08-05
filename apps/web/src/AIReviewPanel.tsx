@@ -274,6 +274,8 @@ export function AIReviewPanel({
   const [categorySources, setCategorySources] = useState<
     Map<number, "manual" | "exact_rule">
   >(new Map());
+  const [expandedLines, setExpandedLines] = useState<Set<number>>(new Set());
+  const userToggledLines = useRef<Set<number>>(new Set());
   const messageRef = useRef<HTMLDivElement>(null);
   const dirty =
     !!draft && !!source && JSON.stringify(draft) !== JSON.stringify(source);
@@ -293,6 +295,24 @@ export function AIReviewPanel({
     setStale(false);
     setCategoryTouched(new Set());
     setCategorySources(new Map());
+    const attention = new Set<number>();
+    proposal.snapshot.lineItems.forEach((line, index) => {
+      if (
+        [
+          line.descriptionConfidence,
+          line.lineTotalConfidence,
+          line.categoryConfidence,
+        ].some((value) => value != null && value < 0.7) ||
+        !line.description.trim()
+      )
+        attention.add(index);
+    });
+    proposal.findings.forEach((finding) => {
+      const match = finding.fieldPath?.match(/^lineItems\.(\d+)(?:\.|$)/);
+      if (match) attention.add(Number(match[1]));
+    });
+    setExpandedLines(attention);
+    userToggledLines.current.clear();
   }, [lifecycle.proposal, proposalId, dirty]);
 
   const warningCodes = useMemo(
@@ -652,7 +672,22 @@ export function AIReviewPanel({
                   className={`finding finding--${finding.severity}`}
                   onClick={() => {
                     const id = proposalFieldId(finding.fieldPath);
-                    if (id) document.getElementById(id)?.focus();
+                    const match = finding.fieldPath?.match(
+                      /^lineItems\.(\d+)(?:\.|$)/,
+                    );
+                    if (match) {
+                      const lineIndex = Number(match[1]);
+                      setExpandedLines((current) =>
+                        new Set(current).add(lineIndex),
+                      );
+                    }
+                    if (id) {
+                      if (match)
+                        requestAnimationFrame(() =>
+                          document.getElementById(id)?.focus(),
+                        );
+                      else document.getElementById(id)?.focus();
+                    }
                   }}
                 >
                   <strong>{finding.severity}</strong> {finding.message}
@@ -722,163 +757,316 @@ export function AIReviewPanel({
           </div>
           <div className="proposal-lines">
             <h3>Proposed line items</h3>
-            {draft.lines.map((line, index) => {
-              const proposed = lifecycle.proposal?.snapshot.lineItems[index];
-              return (
-                <article className="proposal-line" key={index}>
-                  <strong>Line {index + 1}</strong>
-                  <label className="field field--wide">
-                    <span>Description</span>
-                    <input
-                      id={`proposal-line-${index}-description`}
-                      value={line.description}
-                      onChange={(event) =>
-                        updateLine(index, { description: event.target.value })
-                      }
-                    />
-                    {confidence(proposed?.descriptionConfidence ?? null)}
-                  </label>
-                  <label className="field">
-                    <span>Quantity (thousandths)</span>
-                    <input
-                      id={`proposal-line-${index}-quantityMilli`}
-                      inputMode="numeric"
-                      value={line.quantityMilli}
-                      onChange={(event) =>
-                        updateLine(index, { quantityMilli: event.target.value })
-                      }
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Unit price</span>
-                    <input
-                      id={`proposal-line-${index}-unitPriceCents`}
-                      inputMode="decimal"
-                      value={line.unitPrice}
-                      onChange={(event) =>
-                        updateLine(index, { unitPrice: event.target.value })
-                      }
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Line total</span>
-                    <input
-                      id={`proposal-line-${index}-lineTotalCents`}
-                      inputMode="decimal"
-                      value={line.lineTotal}
-                      onChange={(event) =>
-                        updateLine(index, { lineTotal: event.target.value })
-                      }
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Kind</span>
-                    <select
-                      value={line.kind}
-                      onChange={(event) =>
-                        updateLine(index, {
-                          kind: event.target
-                            .value as Draft["lines"][number]["kind"],
-                        })
-                      }
+            <div
+              className="line-table line-table--proposal"
+              role="table"
+              aria-label="Proposed line items"
+            >
+              <div className="line-table__header" role="rowgroup">
+                <div
+                  role="row"
+                  className="line-row line-row--proposal line-row--header"
+                >
+                  <span role="columnheader">Description</span>
+                  <span role="columnheader">Quantity</span>
+                  <span role="columnheader">Unit price</span>
+                  <span role="columnheader">Line total</span>
+                  <span role="columnheader">Category</span>
+                  <span role="columnheader" aria-label="Details" />
+                </div>
+              </div>
+              <div role="rowgroup">
+                {draft.lines.map((line, index) => {
+                  const proposed =
+                    lifecycle.proposal?.snapshot.lineItems[index];
+                  const expanded = expandedLines.has(index);
+                  const labelId = `proposal-line-${index}-label`;
+                  const detailId = `proposal-line-${index}-details`;
+                  return (
+                    <div
+                      className="line-entry line-entry--proposal"
+                      key={index}
                     >
-                      <option value="unknown">Unknown</option>
-                      <option value="item">Item</option>
-                      <option value="discount">Discount</option>
-                      <option value="return">Return</option>
-                      <option value="deposit">Deposit</option>
-                      <option value="deposit_refund">Deposit refund</option>
-                    </select>
-                  </label>
-                  <label className="field field--wide">
-                    <span>Category</span>
-                    <select
-                      id={`proposal-line-${index}-categoryId`}
-                      value={line.categoryId ?? ""}
-                      onChange={(event) => (
-                        updateLine(index, {
-                          categoryId: event.target.value || null,
-                        }),
-                        setCategoryTouched((current) =>
-                          new Set(current).add(index),
-                        ),
-                        setCategorySources((current) =>
-                          new Map(current).set(index, "manual"),
-                        )
-                      )}
-                    >
-                      <CategoryOptions
-                        categories={categories}
-                        value={line.categoryId}
-                      />
-                    </select>
-                  </label>
-                  <small className="category-provenance">
-                    Source:{" "}
-                    {categorySources.get(index) === "manual"
-                      ? "manual edit"
-                      : categorySources.get(index) === "exact_rule"
-                        ? "exact local rule"
-                        : proposed?.categoryProvenance === "exact_rule"
-                          ? "exact local rule"
-                          : proposed?.categoryProvenance === "model"
-                            ? "model"
-                            : "unassigned"}
-                  </small>
-                  {!categoryTouched.has(index) &&
-                    proposed?.categoryProvenance === "model" &&
-                    confidence(proposed.categoryConfidence ?? null)}
-                  {categoryTouched.has(index) && line.categoryId && (
-                    <button
-                      type="button"
-                      className="button button--small button--quiet"
-                      onClick={() => void remember(index)}
-                    >
-                      Remember for future
-                    </button>
-                  )}
-                  {proposed?.categorySuggestion && !line.categoryId && (
-                    <div className="proposal-suggestion">
-                      <span>
-                        Suggested:{" "}
-                        {categoryLabel(
-                          categories.find(
-                            (category) =>
-                              category.id ===
-                              proposed.categorySuggestion?.categoryId,
-                          ) ??
-                            ({
-                              id: proposed.categorySuggestion.categoryId,
-                              name: "Category",
-                              parentId: null,
-                            } as Category),
-                          categories,
-                        )}{" "}
-                        · {proposed.categorySuggestion.scopeKind} rule
-                      </span>
-                      <button
-                        type="button"
-                        className="button button--small button--quiet"
-                        onClick={() => (
-                          updateLine(index, {
-                            categoryId:
-                              proposed.categorySuggestion?.categoryId ?? null,
-                          }),
-                          setCategoryTouched((current) =>
-                            new Set(current).add(index),
-                          ),
-                          setCategorySources((current) =>
-                            new Map(current).set(index, "exact_rule"),
-                          )
-                        )}
+                      <div
+                        role="row"
+                        className="line-row line-row--proposal"
+                        aria-labelledby={labelId}
                       >
-                        Adopt suggestion
-                      </button>
+                        <div
+                          role="cell"
+                          className="line-cell line-cell--description"
+                          data-label="Description"
+                        >
+                          <label
+                            className="visually-hidden"
+                            htmlFor={`proposal-line-${index}-description`}
+                          >
+                            Description for proposed line {index + 1}
+                          </label>
+                          <input
+                            id={`proposal-line-${index}-description`}
+                            title={line.description}
+                            value={line.description}
+                            onChange={(event) =>
+                              updateLine(index, {
+                                description: event.target.value,
+                              })
+                            }
+                          />
+                          <span id={labelId} className="visually-hidden">
+                            Proposed line {index + 1}:{" "}
+                            {line.description || "no description"}
+                          </span>
+                        </div>
+                        <div
+                          role="cell"
+                          className="line-cell"
+                          data-label="Quantity"
+                        >
+                          <label
+                            className="visually-hidden"
+                            htmlFor={`proposal-line-${index}-quantityMilli`}
+                          >
+                            Quantity (thousandths)
+                          </label>
+                          <input
+                            id={`proposal-line-${index}-quantityMilli`}
+                            inputMode="numeric"
+                            value={line.quantityMilli}
+                            onChange={(event) =>
+                              updateLine(index, {
+                                quantityMilli: event.target.value,
+                              })
+                            }
+                          />
+                        </div>
+                        <div
+                          role="cell"
+                          className="line-cell"
+                          data-label="Unit price"
+                        >
+                          <label
+                            className="visually-hidden"
+                            htmlFor={`proposal-line-${index}-unitPriceCents`}
+                          >
+                            Unit price
+                          </label>
+                          <input
+                            id={`proposal-line-${index}-unitPriceCents`}
+                            inputMode="decimal"
+                            value={line.unitPrice}
+                            onChange={(event) =>
+                              updateLine(index, {
+                                unitPrice: event.target.value,
+                              })
+                            }
+                          />
+                        </div>
+                        <div
+                          role="cell"
+                          className="line-cell"
+                          data-label="Line total"
+                        >
+                          <label
+                            className="visually-hidden"
+                            htmlFor={`proposal-line-${index}-lineTotalCents`}
+                          >
+                            Line total
+                          </label>
+                          <input
+                            id={`proposal-line-${index}-lineTotalCents`}
+                            inputMode="decimal"
+                            value={line.lineTotal}
+                            onChange={(event) =>
+                              updateLine(index, {
+                                lineTotal: event.target.value,
+                              })
+                            }
+                          />
+                        </div>
+                        <div
+                          role="cell"
+                          className="line-cell line-cell--category"
+                          data-label="Category"
+                        >
+                          <label
+                            className="visually-hidden"
+                            htmlFor={`proposal-line-${index}-categoryId`}
+                          >
+                            Category for proposed line {index + 1}
+                          </label>
+                          <select
+                            id={`proposal-line-${index}-categoryId`}
+                            value={line.categoryId ?? ""}
+                            onChange={(event) => (
+                              updateLine(index, {
+                                categoryId: event.target.value || null,
+                              }),
+                              setCategoryTouched((current) =>
+                                new Set(current).add(index),
+                              ),
+                              setCategorySources((current) =>
+                                new Map(current).set(index, "manual"),
+                              )
+                            )}
+                          >
+                            <CategoryOptions
+                              categories={categories}
+                              value={line.categoryId}
+                            />
+                          </select>
+                        </div>
+                        <div
+                          role="cell"
+                          className="line-cell line-cell--toggle"
+                          data-label="Details"
+                        >
+                          <button
+                            type="button"
+                            className="line-toggle"
+                            aria-expanded={expanded}
+                            aria-controls={detailId}
+                            aria-label={`${expanded ? "Collapse" : "Expand"} details for proposed line ${index + 1}`}
+                            onClick={() => {
+                              userToggledLines.current.add(index);
+                              setExpandedLines((current) => {
+                                const next = new Set(current);
+                                if (next.has(index)) next.delete(index);
+                                else next.add(index);
+                                return next;
+                              });
+                            }}
+                          >
+                            {expanded ? "−" : "+"}
+                          </button>
+                        </div>
+                      </div>
+                      <div
+                        role="row"
+                        className="line-detail-row"
+                        hidden={!expanded}
+                      >
+                        <div
+                          role="cell"
+                          className="line-detail proposal-line-detail"
+                          id={detailId}
+                          aria-labelledby={labelId}
+                        >
+                          <p className="line-description-full">
+                            <strong>Full description:</strong>{" "}
+                            {line.description || "No description"}
+                          </p>
+                          <div className="proposal-detail-grid">
+                            <label className="field">
+                              <span>Kind</span>
+                              <select
+                                value={line.kind}
+                                onChange={(event) =>
+                                  updateLine(index, {
+                                    kind: event.target
+                                      .value as Draft["lines"][number]["kind"],
+                                  })
+                                }
+                              >
+                                <option value="unknown">Unknown</option>
+                                <option value="item">Item</option>
+                                <option value="discount">Discount</option>
+                                <option value="return">Return</option>
+                                <option value="deposit">Deposit</option>
+                                <option value="deposit_refund">
+                                  Deposit refund
+                                </option>
+                              </select>
+                            </label>
+                            <div className="proposal-confidence">
+                              <strong>Provider confidence</strong>
+                              {confidence(
+                                proposed?.descriptionConfidence ?? null,
+                              )}
+                              {confidence(
+                                proposed?.lineTotalConfidence ?? null,
+                              )}
+                            </div>
+                            <small className="category-provenance">
+                              Source:{" "}
+                              {categorySources.get(index) === "manual"
+                                ? "manual edit"
+                                : categorySources.get(index) === "exact_rule"
+                                  ? "exact local rule"
+                                  : proposed?.categoryProvenance ===
+                                      "exact_rule"
+                                    ? "exact local rule"
+                                    : proposed?.categoryProvenance === "model"
+                                      ? "model"
+                                      : "unassigned"}
+                            </small>
+                            {!categoryTouched.has(index) &&
+                              proposed?.categoryProvenance === "model" &&
+                              confidence(proposed.categoryConfidence ?? null)}
+                            {categoryTouched.has(index) && line.categoryId && (
+                              <button
+                                type="button"
+                                className="button button--small button--quiet"
+                                onClick={() => void remember(index)}
+                              >
+                                Remember for future
+                              </button>
+                            )}
+                            {proposed?.categorySuggestion &&
+                              !line.categoryId && (
+                                <div className="proposal-suggestion">
+                                  <span>
+                                    Suggested:{" "}
+                                    {categoryLabel(
+                                      categories.find(
+                                        (category) =>
+                                          category.id ===
+                                          proposed.categorySuggestion
+                                            ?.categoryId,
+                                      ) ??
+                                        ({
+                                          id: proposed.categorySuggestion
+                                            .categoryId,
+                                          name: "Category",
+                                          parentId: null,
+                                        } as Category),
+                                      categories,
+                                    )}{" "}
+                                    · {proposed.categorySuggestion.scopeKind}{" "}
+                                    rule
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className="button button--small button--quiet"
+                                    onClick={() => (
+                                      updateLine(index, {
+                                        categoryId:
+                                          proposed.categorySuggestion
+                                            ?.categoryId ?? null,
+                                      }),
+                                      setCategoryTouched((current) =>
+                                        new Set(current).add(index),
+                                      ),
+                                      setCategorySources((current) =>
+                                        new Map(current).set(
+                                          index,
+                                          "exact_rule",
+                                        ),
+                                      )
+                                    )}
+                                  >
+                                    Adopt suggestion
+                                  </button>
+                                </div>
+                              )}
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                  )}
-                </article>
-              );
-            })}
+                  );
+                })}
+              </div>
+            </div>
           </div>
           {warningCodes.length > 0 && (
             <fieldset className="warning-acknowledgements">
