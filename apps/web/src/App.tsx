@@ -1323,6 +1323,7 @@ export function CategorySuggestionAdvice({
   categories,
   onAdopt,
   onStatus,
+  onActionable,
 }: {
   description: string;
   categoryId: string | null;
@@ -1331,6 +1332,7 @@ export function CategorySuggestionAdvice({
   categories: Category[];
   onAdopt: (categoryId: string) => void;
   onStatus: (message: string) => void;
+  onActionable?: () => void;
 }) {
   const [suggestion, setSuggestion] = useState<CategorySuggestionRule | null>(
     null,
@@ -1362,6 +1364,9 @@ export function CategorySuggestionAdvice({
       });
     return () => controller.abort();
   }, [description, categoryId, brandId, storeId]);
+  useEffect(() => {
+    if (suggestion && !categoryId) onActionable?.();
+  }, [suggestion, categoryId, onActionable]);
   useEffect(() => {
     if (!brandId) setScope("global");
     else if (!storeId && scope === "store") setScope("brand");
@@ -1472,6 +1477,8 @@ function ReceiptEditor({ id }: { id: string }) {
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newCategoryParentId, setNewCategoryParentId] = useState("");
   const [creatingCategory, setCreatingCategory] = useState(false);
+  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
+  const userToggledItems = useRef<Set<string>>(new Set());
   const dirty = JSON.stringify(values) !== JSON.stringify(saved);
   const load = useCallback(async () => {
     setLoadState("loading");
@@ -1572,8 +1579,17 @@ function ReceiptEditor({ id }: { id: string }) {
     );
   };
   const remove = (index: number) => {
+    const removedKey = values.items[index]?.key;
     const items = values.items.filter((_item, at) => at !== index);
     update("items", items);
+    if (removedKey) {
+      setExpandedItems((current) => {
+        const next = new Set(current);
+        next.delete(removedKey);
+        return next;
+      });
+      userToggledItems.current.delete(removedKey);
+    }
     requestAnimationFrame(() =>
       document
         .getElementById(
@@ -1925,156 +1941,287 @@ function ReceiptEditor({ id }: { id: string }) {
                 <p>No line items yet.</p>
               </div>
             )}
-            {values.items.map((item, index) => (
-              <article className="panel item" key={item.key}>
-                <div className="item-title">
-                  <label className="item-select">
-                    <input
-                      type="checkbox"
-                      checked={selectedItems.has(item.key)}
-                      onChange={(event) =>
-                        setSelectedItems((current) => {
-                          const next = new Set(current);
-                          if (event.target.checked) next.add(item.key);
-                          else next.delete(item.key);
-                          return next;
-                        })
-                      }
-                    />
-                    <strong>Item {index + 1}</strong>
-                  </label>
-                  <div>
-                    <button
-                      aria-label={`Move item ${index + 1} up`}
-                      disabled={index === 0}
-                      onClick={() => move(index, -1)}
-                    >
-                      ↑
-                    </button>
-                    <button
-                      aria-label={`Move item ${index + 1} down`}
-                      disabled={index === values.items.length - 1}
-                      onClick={() => move(index, 1)}
-                    >
-                      ↓
-                    </button>
-                    <button
-                      className="danger-text"
-                      aria-label={`Remove item ${index + 1}`}
-                      onClick={() => remove(index)}
-                    >
-                      Remove
-                    </button>
+            {values.items.length > 0 && (
+              <div
+                className="line-table panel"
+                role="table"
+                aria-label="Receipt line items"
+              >
+                <div className="line-table__header" role="rowgroup">
+                  <div role="row" className="line-row line-row--header">
+                    <span role="columnheader" aria-label="Select" />
+                    <span role="columnheader">Description</span>
+                    <span role="columnheader">Quantity</span>
+                    <span role="columnheader">Unit price</span>
+                    <span role="columnheader">Line total</span>
+                    <span role="columnheader">Category</span>
+                    <span role="columnheader" aria-label="Details" />
                   </div>
                 </div>
-                <div className="item-fields">
-                  <EditorField
-                    label="Description"
-                    id={`item-${item.key}-description`}
-                    value={item.description}
-                    error={errors[`item-${index}-description`]}
-                    onChange={(value) =>
-                      updateItem(index, "description", value)
-                    }
-                  />
-                  <div className="field field--wide">
-                    <label htmlFor={`item-${item.key}-category`}>
-                      Category
-                    </label>
-                    <select
-                      id={`item-${item.key}-category`}
-                      value={item.categoryId ?? ""}
-                      title={
-                        item.categoryId
-                          ? categoryLabel(
-                              // Defensive fallback for a stale category-list
-                              // response; referenced categories cannot normally
-                              // be deleted by the API.
-                              categories.find(
-                                ({ id }) => id === item.categoryId,
-                              ) ??
-                                ({
-                                  id: item.categoryId,
-                                  name: "Assigned category",
-                                  parentId: null,
-                                } as Category),
-                              categories,
-                            )
-                          : "Uncategorized"
-                      }
-                      onKeyDown={(event) => {
-                        if (
-                          event.ctrlKey &&
-                          (event.key === "ArrowDown" || event.key === "ArrowUp")
-                        ) {
-                          event.preventDefault();
-                          const target =
-                            index + (event.key === "ArrowDown" ? 1 : -1);
-                          document
-                            .getElementById(
-                              `item-${values.items[target]?.key ?? ""}-category`,
-                            )
-                            ?.focus();
-                        }
-                      }}
-                      onChange={(event) =>
-                        updateItem(
-                          index,
-                          "categoryId",
-                          event.target.value || null,
-                        )
-                      }
-                    >
-                      <CategoryOptions
-                        categories={categories}
-                        value={item.categoryId ?? null}
-                      />
-                    </select>
-                    <small>
-                      Use Ctrl + ↑/↓ to move between category controls.
-                    </small>
-                    <CategorySuggestionAdvice
-                      description={item.description}
-                      categoryId={item.categoryId ?? null}
-                      brandId={values.merchantBrandId}
-                      storeId={values.merchantStoreId}
-                      categories={categories}
-                      onAdopt={(categoryId) => {
-                        updateItem(index, "categoryId", categoryId);
-                        setStatus(
-                          "Suggestion adopted locally. Save the receipt to keep it.",
-                        );
-                      }}
-                      onStatus={setStatus}
-                    />
-                  </div>
-                  <EditorField
-                    label="Quantity"
-                    id={`item-${item.key}-quantity`}
-                    value={item.quantity}
-                    error={errors[`item-${index}-quantity`]}
-                    inputMode="decimal"
-                    onChange={(value) => updateItem(index, "quantity", value)}
-                  />
-                  <EditorField
-                    label="Unit price"
-                    id={`item-${item.key}-unitPrice`}
-                    value={item.unitPrice}
-                    error={errors[`item-${index}-unitPrice`]}
-                    inputMode="decimal"
-                    onChange={(value) => updateItem(index, "unitPrice", value)}
-                  />
-                  <EditorField
-                    label="Line total"
-                    id={`item-${item.key}-lineTotal`}
-                    value={item.lineTotal}
-                    error={errors[`item-${index}-lineTotal`]}
-                    inputMode="decimal"
-                    onChange={(value) => updateItem(index, "lineTotal", value)}
-                  />
+                <div role="rowgroup">
+                  {values.items.map((item, index) => {
+                    const expanded = expandedItems.has(item.key);
+                    const labelId = `item-${item.key}-label`;
+                    const detailId = `item-${item.key}-details`;
+                    return (
+                      <div className="line-entry" key={item.key}>
+                        <div
+                          className="line-row"
+                          role="row"
+                          aria-labelledby={labelId}
+                        >
+                          <div
+                            role="cell"
+                            className="line-cell line-cell--select"
+                            data-label="Select"
+                          >
+                            <label className="item-select">
+                              <input
+                                aria-label={`Item ${index + 1}`}
+                                type="checkbox"
+                                checked={selectedItems.has(item.key)}
+                                onChange={(event) =>
+                                  setSelectedItems((current) => {
+                                    const next = new Set(current);
+                                    if (event.target.checked)
+                                      next.add(item.key);
+                                    else next.delete(item.key);
+                                    return next;
+                                  })
+                                }
+                              />
+                            </label>
+                          </div>
+                          <div
+                            role="cell"
+                            className="line-cell line-cell--description"
+                            data-label="Description"
+                          >
+                            <label
+                              className="visually-hidden"
+                              htmlFor={`item-${item.key}-description`}
+                            >
+                              Description
+                            </label>
+                            <input
+                              id={`item-${item.key}-description`}
+                              value={item.description}
+                              title={item.description}
+                              aria-describedby={
+                                errors[`item-${index}-description`]
+                                  ? `item-${item.key}-description-error`
+                                  : undefined
+                              }
+                              onChange={(event) =>
+                                updateItem(
+                                  index,
+                                  "description",
+                                  event.target.value,
+                                )
+                              }
+                            />
+                            <span id={labelId} className="visually-hidden">
+                              Item {index + 1}:{" "}
+                              {item.description || "no description"}
+                            </span>
+                            {errors[`item-${index}-description`] && (
+                              <small
+                                id={`item-${item.key}-description-error`}
+                                className="inline-error"
+                              >
+                                {errors[`item-${index}-description`]}
+                              </small>
+                            )}
+                          </div>
+                          {(
+                            [
+                              [
+                                "Quantity",
+                                "quantity",
+                                item.quantity,
+                                "decimal",
+                              ],
+                              [
+                                "Unit price",
+                                "unitPrice",
+                                item.unitPrice,
+                                "decimal",
+                              ],
+                              [
+                                "Line total",
+                                "lineTotal",
+                                item.lineTotal,
+                                "decimal",
+                              ],
+                            ] as const
+                          ).map(([label, field, value, inputMode]) => (
+                            <div
+                              role="cell"
+                              className="line-cell"
+                              data-label={label}
+                              key={field}
+                            >
+                              <label
+                                className="visually-hidden"
+                                htmlFor={`item-${item.key}-${field}`}
+                              >
+                                {label}
+                              </label>
+                              <input
+                                id={`item-${item.key}-${field}`}
+                                value={value}
+                                inputMode={inputMode}
+                                onChange={(event) =>
+                                  updateItem(index, field, event.target.value)
+                                }
+                              />
+                              {errors[`item-${index}-${field}`] && (
+                                <small className="inline-error">
+                                  {errors[`item-${index}-${field}`]}
+                                </small>
+                              )}
+                            </div>
+                          ))}
+                          <div
+                            role="cell"
+                            className="line-cell line-cell--category"
+                            data-label="Category"
+                          >
+                            <label
+                              className="visually-hidden"
+                              htmlFor={`item-${item.key}-category`}
+                            >
+                              Category
+                            </label>
+                            <select
+                              id={`item-${item.key}-category`}
+                              value={item.categoryId ?? ""}
+                              onKeyDown={(event) => {
+                                if (
+                                  event.ctrlKey &&
+                                  (event.key === "ArrowDown" ||
+                                    event.key === "ArrowUp")
+                                ) {
+                                  event.preventDefault();
+                                  const target =
+                                    index +
+                                    (event.key === "ArrowDown" ? 1 : -1);
+                                  document
+                                    .getElementById(
+                                      `item-${values.items[target]?.key ?? ""}-category`,
+                                    )
+                                    ?.focus();
+                                }
+                              }}
+                              onChange={(event) =>
+                                updateItem(
+                                  index,
+                                  "categoryId",
+                                  event.target.value || null,
+                                )
+                              }
+                            >
+                              <CategoryOptions
+                                categories={categories}
+                                value={item.categoryId ?? null}
+                              />
+                            </select>
+                          </div>
+                          <div
+                            role="cell"
+                            className="line-cell line-cell--toggle"
+                            data-label="Details"
+                          >
+                            <button
+                              type="button"
+                              className="line-toggle"
+                              aria-label={`${expanded ? "Collapse" : "Expand"} details for item ${index + 1}`}
+                              aria-expanded={expanded}
+                              aria-controls={detailId}
+                              onClick={() => {
+                                userToggledItems.current.add(item.key);
+                                setExpandedItems((current) => {
+                                  const next = new Set(current);
+                                  if (next.has(item.key)) next.delete(item.key);
+                                  else next.add(item.key);
+                                  return next;
+                                });
+                              }}
+                            >
+                              {expanded ? "−" : "+"}
+                            </button>
+                          </div>
+                        </div>
+                        <div
+                          role="row"
+                          className="line-detail-row"
+                          hidden={!expanded}
+                        >
+                          <div
+                            role="cell"
+                            className="line-detail"
+                            id={detailId}
+                            aria-labelledby={labelId}
+                          >
+                            <p className="line-description-full">
+                              <strong>Full description:</strong>{" "}
+                              {item.description || "No description"}
+                            </p>
+                            <div className="line-actions">
+                              <button
+                                aria-label={`Move item ${index + 1} up`}
+                                disabled={index === 0}
+                                onClick={() => move(index, -1)}
+                              >
+                                ↑
+                              </button>
+                              <button
+                                aria-label={`Move item ${index + 1} down`}
+                                disabled={index === values.items.length - 1}
+                                onClick={() => move(index, 1)}
+                              >
+                                ↓
+                              </button>
+                              <button
+                                className="danger-text"
+                                aria-label={`Remove item ${index + 1}`}
+                                onClick={() => remove(index)}
+                              >
+                                Remove
+                              </button>
+                            </div>
+                            <small>
+                              Use Ctrl + ↑/↓ to move between category controls.
+                            </small>
+                            <CategorySuggestionAdvice
+                              description={item.description}
+                              categoryId={item.categoryId ?? null}
+                              brandId={values.merchantBrandId}
+                              storeId={values.merchantStoreId}
+                              categories={categories}
+                              onAdopt={(categoryId) => {
+                                updateItem(index, "categoryId", categoryId);
+                                setStatus(
+                                  "Suggestion adopted locally. Save the receipt to keep it.",
+                                );
+                              }}
+                              onStatus={setStatus}
+                              onActionable={() => {
+                                if (!userToggledItems.current.has(item.key))
+                                  setExpandedItems((current) => {
+                                    if (current.has(item.key)) return current;
+                                    return new Set(current).add(item.key);
+                                  });
+                              }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              </article>
-            ))}
+              </div>
+            )}
           </section>
         </div>
         <aside className="panel totals" aria-label="Receipt totals">

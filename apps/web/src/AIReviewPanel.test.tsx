@@ -102,6 +102,12 @@ const proposal = {
       fieldPath: "merchantRaw",
       message: "Provider confidence is low",
     },
+    {
+      code: "line_low_confidence",
+      severity: "info",
+      fieldPath: "lineItems.0.description",
+      message: "Line description confidence is low",
+    },
   ],
   createdAt: now,
   updatedAt: now,
@@ -302,6 +308,16 @@ describe("AI review panel", () => {
     expect(await screen.findByText("42% confidence")).toHaveClass(
       "confidence--low",
     );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Collapse details for proposed line 1",
+      }),
+    );
+    expect(
+      screen.getByRole("button", {
+        name: "Expand details for proposed line 1",
+      }),
+    ).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(screen.getByRole("button", { name: /Line sum differs/ }));
     expect(document.getElementById("proposal-totalCents")).toHaveFocus();
     const merchant = document.getElementById("proposal-merchantRaw");
@@ -309,6 +325,24 @@ describe("AI review panel", () => {
     fireEvent.change(merchant, {
       target: { value: "Human Markt" },
     });
+    expect(
+      screen.getByRole("button", {
+        name: "Expand details for proposed line 1",
+      }),
+    ).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(
+      screen.getByRole("button", { name: /Line description confidence/ }),
+    );
+    await waitFor(() =>
+      expect(
+        document.getElementById("proposal-line-0-description"),
+      ).toHaveFocus(),
+    );
+    expect(
+      screen.getByRole("button", {
+        name: "Collapse details for proposed line 1",
+      }),
+    ).toHaveAttribute("aria-expanded", "true");
     fireEvent.click(screen.getByRole("button", { name: "Adopt suggestion" }));
     expect(document.getElementById("proposal-line-0-categoryId")).toHaveValue(
       categoryId,

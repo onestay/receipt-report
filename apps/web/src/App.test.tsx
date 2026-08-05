@@ -1072,9 +1072,15 @@ describe("receipt editor", () => {
       target: { value: "4,00" },
     });
     expect(screen.getByText(/Difference:/)).toBeVisible();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Expand details for item 2" }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Move item 2 up" }));
     await waitFor(() =>
       expect(screen.getAllByLabelText("Description")[0]).toHaveFocus(),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Expand details for item 2" }),
     );
     fireEvent.click(screen.getByRole("button", { name: "Remove item 2" }));
     await waitFor(() =>
@@ -1405,6 +1411,9 @@ describe("receipt editor", () => {
     );
     render(<App />);
     await screen.findByRole("heading", { name: "Edit receipt" });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Expand details for item 1" }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Remove item 1" }));
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /Add item/ })).toHaveFocus(),
