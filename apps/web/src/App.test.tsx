@@ -17,6 +17,8 @@ import {
   type MerchantIdentityValue,
   parseMoney,
   parseQuantity,
+  parseSignedMoneyInput,
+  receiptComposition,
 } from "./App.js";
 
 function MerchantHarness({
@@ -1006,6 +1008,7 @@ describe("receipt editor", () => {
     expect(parseQuantity("1.5")).toBe(1500);
     expect(parseQuantity("0")).toBeNull();
     expect(parseQuantity("1,2345")).toBeNull();
+    expect(parseSignedMoneyInput("-0,50")).toBe(-50);
     expect(
       lineTotalSum({
         merchantRaw: "",
@@ -1032,6 +1035,57 @@ describe("receipt editor", () => {
       }),
     ).toBe(300);
   });
+  it("builds live signed category buckets and explicit adjustments", () => {
+    const category = {
+      id: "cm52345678901234567890123",
+      name: "Bakery",
+      normalizedName: "bakery",
+      parentId: null,
+      position: 0,
+      archivedAt: null,
+      isLeaf: true,
+      isEffectivelyActive: true,
+      isAssignable: true,
+      createdAt: "2026-07-30T00:00:00.000Z",
+      updatedAt: "2026-07-30T00:00:00.000Z",
+    };
+    expect(
+      receiptComposition(
+        {
+          total: "3,00",
+          items: [
+            {
+              key: "a",
+              description: "Bread",
+              quantity: "",
+              unitPrice: "",
+              lineTotal: "4,00",
+              categoryId: category.id,
+              kind: "item",
+            },
+            {
+              key: "b",
+              description: "Discount",
+              quantity: "",
+              unitPrice: "",
+              lineTotal: "-0,50",
+              categoryId: null,
+              kind: "discount",
+            },
+          ],
+        },
+        [category],
+      ),
+    ).toEqual([
+      { key: category.id, label: "Bakery", signedCents: 400 },
+      { key: "uncategorized", label: "Uncategorized", signedCents: -50 },
+      {
+        key: "unallocated-adjustment",
+        label: "Unallocated adjustment",
+        signedCents: -50,
+      },
+    ]);
+  });
   it("loads, edits, reorders, validates, and saves atomically", async () => {
     history.replaceState({}, "", `/receipts/${receipt.id}`);
     const fetchMock = vi
@@ -1047,6 +1101,11 @@ describe("receipt editor", () => {
     expect(
       await screen.findByRole("heading", { name: "Edit receipt" }),
     ).toBeInTheDocument();
+    const summary = screen.getByRole("region", { name: "Receipt summary" });
+    expect(summary).toHaveTextContent("3,00 €");
+    expect(summary).toHaveTextContent("0%");
+    expect(summary).toHaveTextContent("0 of 2 item rows");
+    expect(summary).toHaveTextContent("Not available");
     fireEvent.change(screen.getByLabelText("Merchant"), {
       target: { value: "Changed Markt" },
     });

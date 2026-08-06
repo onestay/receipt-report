@@ -18,6 +18,7 @@ import {
   displayDate,
   parseDateInput,
 } from "./DateField.js";
+import { CategoryComposition } from "./CategoryComposition.js";
 
 const euros = new Intl.NumberFormat("de-DE", {
   style: "currency",
@@ -597,7 +598,15 @@ export function Insights({ clock = currentTime }: { clock?: () => Date }) {
           </section>
           <div className="breakdown-grid">
             <Breakdown title="Monthly trend" items={report.monthly} />
-            <Breakdown title="Categories" items={report.categories} />
+            <CategoryComposition
+              title="Categories"
+              buckets={report.categories.map((item) => ({
+                key: item.key,
+                label: item.label,
+                signedCents: item.grossCents,
+                drillDownUrl: receiptHref(item.drillDownUrl),
+              }))}
+            />
             <Breakdown title="Brands" items={report.merchantBrands} />
             <Breakdown title="Stores" items={report.merchantStores} />
             <Breakdown title="Printed merchants" items={report.rawMerchants} />
