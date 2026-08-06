@@ -11,6 +11,7 @@ import {
 } from "@receipt-report/contracts";
 import { CategoryOptions, categoryLabel } from "./Categories.js";
 import { rememberCategoryRule } from "./CategorySuggestionRules.js";
+import { DateField, displayDate, parseDateInput } from "./DateField.js";
 
 type Phase =
   | "idle"
@@ -212,7 +213,7 @@ function draftFrom(snapshot: ProposalSnapshot): Draft {
     merchantRaw: snapshot.merchantRaw,
     merchantBrandId: snapshot.merchantBrandId,
     merchantStoreId: snapshot.merchantStoreId,
-    purchaseDate: snapshot.purchaseDate,
+    purchaseDate: displayDate(snapshot.purchaseDate),
     purchaseTime: snapshot.purchaseTime ?? "",
     total: formatSignedMoney(snapshot.totalCents),
     net: formatSignedMoney(snapshot.netCents),
@@ -368,6 +369,8 @@ export function AIReviewPanel({
     const total = parseSignedMoney(draft.total);
     const net = draft.net ? parseSignedMoney(draft.net) : null;
     const tax = draft.tax ? parseSignedMoney(draft.tax) : null;
+    const purchaseDate = parseDateInput(draft.purchaseDate);
+    if (purchaseDate.iso === null) return null;
     const lines = draft.lines.map((line, index) => ({
       sourcePosition: index,
       description: line.description,
@@ -416,7 +419,7 @@ export function AIReviewPanel({
       merchantConfidence: lifecycle.proposal.snapshot.merchantConfidence,
       merchantBrandId: draft.merchantBrandId,
       merchantStoreId: draft.merchantStoreId,
-      purchaseDate: draft.purchaseDate,
+      purchaseDate: purchaseDate.iso,
       purchaseDateConfidence:
         lifecycle.proposal.snapshot.purchaseDateConfidence,
       purchaseTime: draft.purchaseTime || null,
@@ -707,18 +710,18 @@ export function AIReviewPanel({
               />
               {confidence(lifecycle.proposal.snapshot.merchantConfidence)}
             </label>
-            <label className="field">
-              <span>Purchase date</span>
-              <input
+            <div>
+              <DateField
                 id="proposal-purchaseDate"
-                type="date"
+                label="Purchase date"
                 value={draft.purchaseDate}
-                onChange={(event) =>
-                  setDraft({ ...draft, purchaseDate: event.target.value })
+                error={parseDateInput(draft.purchaseDate).error ?? undefined}
+                onChange={(value) =>
+                  setDraft({ ...draft, purchaseDate: value })
                 }
               />
               {confidence(lifecycle.proposal.snapshot.purchaseDateConfidence)}
-            </label>
+            </div>
             <label className="field">
               <span>Time</span>
               <input

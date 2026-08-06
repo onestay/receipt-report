@@ -12,6 +12,12 @@ import {
   type SpendingReportQuery,
 } from "@receipt-report/contracts";
 import { loadCategories } from "./Categories.js";
+import {
+  DateField,
+  dateRangeError,
+  displayDate,
+  parseDateInput,
+} from "./DateField.js";
 
 const euros = new Intl.NumberFormat("de-DE", {
   style: "currency",
@@ -77,8 +83,8 @@ function readFilters(search: string) {
 
 function draftFrom(query: SpendingReportQuery): Draft {
   return {
-    from: query.from,
-    to: query.to,
+    from: displayDate(query.from),
+    to: displayDate(query.to),
     categoryId: query.categoryId ?? "",
     categorySubtree: query.categorySubtree,
     merchantBrandId: query.merchantBrandId ?? "",
@@ -140,6 +146,7 @@ export function Insights() {
     typeof spendingWorkflowSummarySchema.parse
   > | null>(null);
   const [error, setError] = useState("");
+  const [dateErrors, setDateErrors] = useState<Record<string, string>>({});
   const [workflowError, setWorkflowError] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   const [brands, setBrands] = useState<MerchantBrand[]>([]);
@@ -235,8 +242,23 @@ export function Insights() {
 
   function apply(event: FormEvent) {
     event.preventDefault();
+    const from = parseDateInput(draft.from);
+    const to = parseDateInput(draft.to);
+    const range =
+      !from.error && !to.error ? dateRangeError(draft.from, draft.to) : null;
+    const nextErrors = {
+      ...(from.error ? { from: from.error } : {}),
+      ...(to.error ? { to: to.error } : {}),
+      ...(range ? { to: range } : {}),
+    };
+    setDateErrors(nextErrors);
+    if (Object.keys(nextErrors).length) return;
     const parameters = new URLSearchParams();
-    for (const [key, value] of Object.entries(draft))
+    for (const [key, value] of Object.entries({
+      ...draft,
+      from: from.iso,
+      to: to.iso,
+    }))
       if (value !== "" && value !== false) parameters.set(key, String(value));
     history.pushState({}, "", `/insights?${parameters}`);
     window.dispatchEvent(new PopStateEvent("popstate"));
@@ -270,26 +292,22 @@ export function Insights() {
         </div>
       )}
       <form className="insight-filters panel" onSubmit={apply}>
-        <label>
-          From
-          <input
-            aria-label="From"
-            type="date"
-            value={draft.from}
-            onChange={(event) =>
-              setDraft({ ...draft, from: event.target.value })
-            }
-          />
-        </label>
-        <label>
-          To
-          <input
-            aria-label="To"
-            type="date"
-            value={draft.to}
-            onChange={(event) => setDraft({ ...draft, to: event.target.value })}
-          />
-        </label>
+        <DateField
+          id="insights-from"
+          label="From"
+          value={draft.from}
+          error={dateErrors.from}
+          className="insight-date-field"
+          onChange={(value) => setDraft({ ...draft, from: value })}
+        />
+        <DateField
+          id="insights-to"
+          label="To"
+          value={draft.to}
+          error={dateErrors.to}
+          className="insight-date-field"
+          onChange={(value) => setDraft({ ...draft, to: value })}
+        />
         <label>
           Category
           <select

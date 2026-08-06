@@ -227,6 +227,27 @@ describe("proposal API", () => {
     );
   });
 
+  it("rejects a non-ISO proposal date at the approval boundary", async () => {
+    const seeded = await seed({ ...snapshot(), purchaseDate: "31.07.2026" });
+    const receipt = await database.receipt.findUniqueOrThrow({
+      where: { id: seeded.receipt.id },
+    });
+    await request(app())
+      .post(
+        `/api/v1/receipts/${receipt.id}/extraction-proposals/${seeded.proposal.id}/approve`,
+      )
+      .send({
+        receiptUpdatedAt: receipt.updatedAt.toISOString(),
+        normalizationRevision: "revision-1",
+        snapshot: { ...snapshot(), purchaseDate: "31.07.2026" },
+        acknowledgedWarningCodes: [],
+      })
+      .expect(400);
+    expect(
+      await database.receipt.findUniqueOrThrow({ where: { id: receipt.id } }),
+    ).toMatchObject({ purchaseDate: "2026-07-01" });
+  });
+
   it("records idempotent corrections and reproducible filtered quality", async () => {
     const emptyQuality = await request(app())
       .get("/api/v1/extraction-quality")

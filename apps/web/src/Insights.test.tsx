@@ -143,6 +143,35 @@ describe("spending insights", () => {
     expect(location.search).toContain("categorySubtree=true");
   });
 
+  it("keeps invalid and reversed date edits visible without changing the URL", async () => {
+    history.replaceState({}, "", "/insights?from=2026-01-01&to=2026-12-31");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) =>
+        Promise.resolve(supportingFetch(String(input)) ?? response(baseReport)),
+      ),
+    );
+    render(<Insights />);
+    await screen.findAllByText(/123,45/);
+    fireEvent.change(screen.getByLabelText("From"), {
+      target: { value: "31.02.2026" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    expect(screen.getByLabelText("From")).toHaveValue("31.02.2026");
+    expect(screen.getByText(/Enter a valid date/)).toBeVisible();
+    expect(location.search).toContain("from=2026-01-01");
+
+    fireEvent.change(screen.getByLabelText("From"), {
+      target: { value: "31.12.2026" },
+    });
+    fireEvent.change(screen.getByLabelText("To"), {
+      target: { value: "01.01.2026" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    expect(screen.getByText(/must be on or before/)).toBeVisible();
+    expect(location.search).toContain("to=2026-12-31");
+  });
+
   it("recovers invalid URLs and handles empty and API-error states", async () => {
     history.replaceState({}, "", "/insights?from=bad&to=worse");
     let spendingCalls = 0;
