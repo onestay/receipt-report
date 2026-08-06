@@ -34,6 +34,77 @@ function defaults() {
   return { from: `${today.slice(0, 4)}-01-01`, to: today };
 }
 
+export type PeriodPresetKey =
+  "this-week" | "this-month" | "last-month" | "this-year";
+
+export type PeriodPreset = {
+  key: PeriodPresetKey;
+  label: string;
+  from: string;
+  to: string;
+};
+
+function berlinCalendarDate(instant: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Berlin",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(instant);
+}
+
+function calendarDate(year: number, monthIndex: number, day: number): string {
+  const date = new Date(Date.UTC(year, monthIndex, day));
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+}
+
+export function periodPresets(instant: Date): PeriodPreset[] {
+  const today = berlinCalendarDate(instant);
+  const [yearText, monthText, dayText] = today.split("-");
+  const year = Number(yearText);
+  const monthIndex = Number(monthText) - 1;
+  const day = Number(dayText);
+  const localDate = new Date(Date.UTC(year, monthIndex, day));
+  const mondayOffset = (localDate.getUTCDay() + 6) % 7;
+  return [
+    {
+      key: "this-week",
+      label: "This week",
+      from: calendarDate(year, monthIndex, day - mondayOffset),
+      to: today,
+    },
+    {
+      key: "this-month",
+      label: "This month",
+      from: calendarDate(year, monthIndex, 1),
+      to: today,
+    },
+    {
+      key: "this-year",
+      label: "This year",
+      from: calendarDate(year, 0, 1),
+      to: today,
+    },
+    {
+      key: "last-month",
+      label: "Last month",
+      from: calendarDate(year, monthIndex - 1, 1),
+      to: calendarDate(year, monthIndex, 0),
+    },
+  ];
+}
+
+export function activePeriodPreset(
+  from: string,
+  to: string,
+  presets: PeriodPreset[],
+): PeriodPresetKey | null {
+  return (
+    presets.find((preset) => preset.from === from && preset.to === to)?.key ??
+    null
+  );
+}
+
 function receiptHref(apiUrl: string, extra?: Record<string, string>) {
   const url = new URL(apiUrl, location.origin);
   for (const [key, value] of Object.entries(extra ?? {}))
@@ -65,12 +136,15 @@ type Draft = {
 function readFilters(search: string) {
   const parameters = new URLSearchParams(search);
   const fallback = defaults();
-  const suppliedRange = parameters.has("from") || parameters.has("to");
+  const hasFrom = parameters.has("from");
+  const hasTo = parameters.has("to");
+  const suppliedRange = hasFrom || hasTo;
+  const incompleteRange = hasFrom !== hasTo;
   if (!parameters.has("from")) parameters.set("from", fallback.from);
   if (!parameters.has("to")) parameters.set("to", fallback.to);
-  const parsed = spendingReportQuerySchema.safeParse(
-    Object.fromEntries(parameters),
-  );
+  const parsed = incompleteRange
+    ? { success: false as const }
+    : spendingReportQuerySchema.safeParse(Object.fromEntries(parameters));
   const query: SpendingReportQuery = parsed.success
     ? parsed.data
     : { ...fallback, categorySubtree: false };
@@ -137,7 +211,7 @@ function Breakdown({
   );
 }
 
-export function Insights() {
+export function Insights({ clock = () => new Date() }: { clock?: () => Date }) {
   const [search, setSearch] = useState(location.search);
   const parsed = useMemo(() => readFilters(search), [search]);
   const [draft, setDraft] = useState(() => draftFrom(parsed.query));
@@ -152,6 +226,10 @@ export function Insights() {
   const [brands, setBrands] = useState<MerchantBrand[]>([]);
   const [stores, setStores] = useState<MerchantStore[]>([]);
   const requestNumber = useRef(0);
+  const presets = useMemo(() => periodPresets(clock()), [clock]);
+  const activePreset = parsed.invalid
+    ? null
+    : activePeriodPreset(parsed.query.from, parsed.query.to, presets);
 
   useEffect(() => {
     const update = () => setSearch(location.search);
@@ -264,6 +342,19 @@ export function Insights() {
     window.dispatchEvent(new PopStateEvent("popstate"));
   }
 
+  function applyPreset(preset: PeriodPreset) {
+    const parameters = new URLSearchParams();
+    for (const [key, value] of Object.entries({
+      ...parsed.query,
+      from: preset.from,
+      to: preset.to,
+    }))
+      if (value !== undefined && value !== false)
+        parameters.set(key, String(value));
+    history.pushState({}, "", `/insights?${parameters}`);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }
+
   const workflowLabels = [
     ["preparing", "preparing", "Preparing"],
     ["queued", "queued", "Queued"],
@@ -292,6 +383,23 @@ export function Insights() {
         </div>
       )}
       <form className="insight-filters panel" onSubmit={apply}>
+        <fieldset className="period-presets">
+          <legend>Quick period</legend>
+          <div>
+            {presets.map((preset) => (
+              <button
+                key={preset.key}
+                type="button"
+                className="button button--quiet button--small"
+                aria-pressed={activePreset === preset.key}
+                onClick={() => applyPreset(preset)}
+              >
+                {preset.label}
+              </button>
+            ))}
+            {!activePreset && <span className="period-custom">Custom</span>}
+          </div>
+        </fieldset>
         <DateField
           id="insights-from"
           label="From"
