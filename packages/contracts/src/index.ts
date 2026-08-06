@@ -717,7 +717,9 @@ export const proposalApproveSchema = z
   .object({
     receiptUpdatedAt: z.string().datetime(),
     normalizationRevision: z.string().min(1),
-    snapshot: proposalSnapshotSchema,
+    snapshot: proposalSnapshotSchema.extend({
+      purchaseDate: receiptDateSchema,
+    }),
     acknowledgedWarningCodes: z.array(z.string().min(1)).default([]),
   })
   .strict();

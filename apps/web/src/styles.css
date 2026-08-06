@@ -316,6 +316,36 @@ h1 {
 .field-error {
   color: #9b3027;
 }
+.date-field {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  gap: 0.45rem;
+}
+.date-field > input:first-child {
+  min-width: 8.5rem;
+  flex: 1 1 auto;
+  font-variant-numeric: tabular-nums;
+}
+.date-field__native {
+  position: absolute;
+  width: 1px !important;
+  height: 1px;
+  min-height: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  clip-path: inset(50%);
+}
+.date-field__button {
+  width: 2.65rem;
+  flex: 0 0 auto;
+  min-width: 2.65rem;
+  padding-inline: 0.65rem;
+}
+.insight-filters .date-field .date-field__button,
+.quality-filters .date-field .date-field__button {
+  width: 2.65rem;
+}
 .merchant-identity {
   min-width: 0;
   margin: 0;
@@ -1290,12 +1320,20 @@ progress {
 .quality-filters > strong {
   grid-column: 1 / -1;
 }
-.quality-filters label {
+.quality-filters label,
+.quality-date-field {
   display: grid;
   gap: 0.3rem;
   color: var(--muted);
   font-size: 0.8rem;
   font-weight: 700;
+}
+.quality-date-field input {
+  width: 100%;
+  min-height: 2.65rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 0.7rem;
 }
 .quality-buckets {
   display: grid;
@@ -1360,12 +1398,20 @@ progress {
   margin-bottom: 2rem;
   padding: 1.2rem;
 }
-.insight-filters label {
+.insight-filters label,
+.insight-date-field {
   display: grid;
   gap: 0.35rem;
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 750;
+}
+.insight-date-field > label {
+  color: var(--muted);
+}
+.insight-date-field,
+.quality-date-field {
+  min-width: 0;
 }
 .insight-filters input,
 .insight-filters select {
