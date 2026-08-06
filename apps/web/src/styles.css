@@ -1398,6 +1398,34 @@ progress {
   margin-bottom: 2rem;
   padding: 1.2rem;
 }
+.period-presets {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0 0 0.35rem;
+  border: 0;
+}
+.period-presets legend {
+  margin-bottom: 0.45rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+.period-presets > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.period-presets .button[aria-pressed="true"] {
+  background: var(--forest);
+  color: white;
+}
+.period-custom {
+  padding: 0.35rem 0.2rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 750;
+}
 .insight-filters label,
 .insight-date-field {
   display: grid;
@@ -1554,5 +1582,8 @@ progress {
   }
   .insight-filters .button {
     width: 100%;
+  }
+  .period-presets .button {
+    width: auto;
   }
 }

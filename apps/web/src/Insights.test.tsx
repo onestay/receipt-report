@@ -9,7 +9,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Insights } from "./Insights.js";
+import { Insights, activePeriodPreset, periodPresets } from "./Insights.js";
 
 const emptyWorkflow = {
   preparing: 0,
@@ -87,6 +87,35 @@ afterEach(() => {
 });
 
 describe("spending insights", () => {
+  it.each([
+    ["2026-03-30T12:00:00Z", "2026-03-30", "2026-03-30"],
+    ["2026-04-05T12:00:00Z", "2026-03-30", "2026-04-05"],
+    ["2026-03-31T22:30:00Z", "2026-03-30", "2026-04-01"],
+  ])(
+    "calculates Berlin Monday-through-today weeks for %s",
+    (instant, from, to) => {
+      const week = periodPresets(new Date(instant))[0];
+      expect(week).toMatchObject({ key: "this-week", from, to });
+    },
+  );
+
+  it("handles leap days, January rollover, and preset collisions", () => {
+    const leap = periodPresets(new Date("2024-02-29T12:00:00Z"));
+    expect(leap.find((item) => item.key === "this-month")).toMatchObject({
+      from: "2024-02-01",
+      to: "2024-02-29",
+    });
+    const january = periodPresets(new Date("2026-01-01T12:00:00Z"));
+    expect(january.find((item) => item.key === "last-month")).toMatchObject({
+      from: "2025-12-01",
+      to: "2025-12-31",
+    });
+    const collision = periodPresets(new Date("2024-01-01T12:00:00Z"));
+    expect(activePeriodPreset("2024-01-01", "2024-01-01", collision)).toBe(
+      "this-week",
+    );
+  });
+
   it("restores URL filters, distinguishes missing from zero, and renders drill-downs", async () => {
     history.replaceState(
       {},
@@ -141,6 +170,49 @@ describe("spending insights", () => {
     );
     expect(location.search).toContain("provenance=ai_approved");
     expect(location.search).toContain("categorySubtree=true");
+  });
+
+  it("applies a preset once, preserves filters, and restores active state", async () => {
+    history.replaceState(
+      {},
+      "",
+      "/insights?from=2026-01-01&to=2026-12-31&merchantQuery=Markt&provenance=manual",
+    );
+    const fetchMock = vi.fn((input: RequestInfo | URL) =>
+      Promise.resolve(supportingFetch(String(input)) ?? response(baseReport)),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<Insights clock={() => new Date("2026-08-06T12:00:00Z")} />);
+    await screen.findAllByText(/123,45/);
+    fireEvent.click(screen.getByRole("button", { name: "Last month" }));
+    await waitFor(() => expect(location.search).toContain("from=2026-07-01"));
+    expect(location.search).toContain("to=2026-07-31");
+    expect(location.search).toContain("merchantQuery=Markt");
+    expect(location.search).toContain("provenance=manual");
+    expect(screen.getByRole("button", { name: "Last month" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(
+      fetchMock.mock.calls.filter(([url]) =>
+        String(url).startsWith("/api/v1/reports/spending?"),
+      ),
+    ).toHaveLength(2);
+  });
+
+  it("treats a one-sided URL range as invalid Custom state", async () => {
+    history.replaceState({}, "", "/insights?from=2026-01-01");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) =>
+        Promise.resolve(supportingFetch(String(input)) ?? response(baseReport)),
+      ),
+    );
+    render(<Insights clock={() => new Date("2026-08-06T12:00:00Z")} />);
+    expect(await screen.findByText(/safe year-to-date view/i)).toBeVisible();
+    expect(screen.getByText("Custom")).toBeVisible();
+    for (const button of screen.getAllByRole("button", { pressed: false }))
+      expect(button).toHaveAttribute("aria-pressed", "false");
   });
 
   it("keeps invalid and reversed date edits visible without changing the URL", async () => {
