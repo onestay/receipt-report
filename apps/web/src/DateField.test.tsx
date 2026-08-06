@@ -83,7 +83,9 @@ describe("German date fields", () => {
       "id",
       "from-error",
     );
-    fireEvent.change(container.querySelector(".date-field__native")!, {
+    const nativePicker = container.querySelector(".date-field__native");
+    if (!nativePicker) throw new Error("native picker missing");
+    fireEvent.change(nativePicker, {
       target: { value: "2026-08-03" },
     });
     expect(onChange).toHaveBeenLastCalledWith("03.08.2026");
