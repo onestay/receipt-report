@@ -45,6 +45,10 @@ import {
   displayDate,
   parseDateInput,
 } from "./DateField.js";
+import {
+  CategoryComposition,
+  type CompositionBucket,
+} from "./CategoryComposition.js";
 
 type Route = {
   page:
@@ -486,6 +490,15 @@ export function parseMoney(value: string): number | null {
   return Number.isSafeInteger(cents) ? cents : null;
 }
 
+export function parseSignedMoneyInput(value: string): number | null {
+  const match = value.trim().match(/^(-?)(\d+)(?:[,.](\d{1,2}))?$/);
+  if (!match) return null;
+  const cents =
+    Number(match[2]) * 100 + Number((match[3] ?? "").padEnd(2, "0"));
+  const signed = match[1] === "-" ? -cents : cents;
+  return Number.isSafeInteger(signed) ? signed : null;
+}
+
 export function parseQuantity(value: string): number | null {
   const match = value.trim().match(/^(\d+)(?:[,.](\d{1,3}))?$/);
   if (!match) return null;
@@ -495,9 +508,10 @@ export function parseQuantity(value: string): number | null {
 }
 
 function centsInput(value: number | null): string {
-  return value === null
-    ? ""
-    : `${Math.floor(value / 100)},${String(value % 100).padStart(2, "0")}`;
+  if (value === null) return "";
+  const sign = value < 0 ? "-" : "";
+  const absolute = Math.abs(value);
+  return `${sign}${Math.floor(absolute / 100)},${String(absolute % 100).padStart(2, "0")}`;
 }
 
 function quantityInput(value: number | null): string {
@@ -1283,6 +1297,7 @@ type EditorItem = {
   unitPrice: string;
   lineTotal: string;
   categoryId?: string | null;
+  kind: ReceiptDetail["lineItems"][number]["kind"];
 };
 type EditorValues = {
   merchantRaw: string;
@@ -1293,6 +1308,7 @@ type EditorValues = {
   purchaseDate: string;
   purchaseTime: string;
   total: string;
+  taxCents: number | null;
   notes: string;
   items: EditorItem[];
 };
@@ -1307,6 +1323,7 @@ function editorValues(receipt: ReceiptDetail): EditorValues {
     purchaseDate: displayDate(receipt.purchaseDate),
     purchaseTime: receipt.purchaseTime ?? "",
     total: centsInput(receipt.totalCents),
+    taxCents: receipt.taxCents,
     notes: receipt.notes ?? "",
     items: receipt.lineItems.map((item) => ({
       key: item.id,
@@ -1315,21 +1332,50 @@ function editorValues(receipt: ReceiptDetail): EditorValues {
       unitPrice: centsInput(item.unitPriceCents ?? null),
       lineTotal: centsInput(item.lineTotalCents),
       categoryId: item.categoryId,
+      kind: item.kind,
     })),
   };
 }
 
-export function lineTotalSum<T extends Pick<EditorValues, "items">>(
-  values: T,
+export function lineTotalSum<V extends { items: { lineTotal: string }[] }>(
+  values: V,
 ): number | null {
   let total = 0;
   for (const item of values.items) {
-    const cents = parseMoney(item.lineTotal);
+    const cents = parseSignedMoneyInput(item.lineTotal);
     if (cents === null) return null;
     total += cents;
     if (!Number.isSafeInteger(total)) return null;
   }
   return total;
+}
+
+export function receiptComposition(
+  values: Pick<EditorValues, "items" | "total">,
+  categories: Category[],
+): CompositionBucket[] {
+  const totals = new Map<string, CompositionBucket>();
+  for (const item of values.items) {
+    const cents = parseSignedMoneyInput(item.lineTotal);
+    if (cents === null) continue;
+    const category = categories.find((entry) => entry.id === item.categoryId);
+    const key = category?.id ?? "uncategorized";
+    const current = totals.get(key);
+    totals.set(key, {
+      key,
+      label: category ? categoryLabel(category, categories) : "Uncategorized",
+      signedCents: (current?.signedCents ?? 0) + cents,
+    });
+  }
+  const enteredTotal = parseMoney(values.total);
+  const lineSum = lineTotalSum(values);
+  if (enteredTotal !== null && lineSum !== null && enteredTotal !== lineSum)
+    totals.set("unallocated-adjustment", {
+      key: "unallocated-adjustment",
+      label: "Unallocated adjustment",
+      signedCents: enteredTotal - lineSum,
+    });
+  return [...totals.values()];
 }
 
 export function CategorySuggestionAdvice({
@@ -1477,6 +1523,7 @@ function ReceiptEditor({ id }: { id: string }) {
     purchaseDate: "",
     purchaseTime: "",
     total: "",
+    taxCents: null,
     notes: "",
     items: [],
   };
@@ -1628,6 +1675,7 @@ function ReceiptEditor({ id }: { id: string }) {
         unitPrice: "",
         lineTotal: "",
         categoryId: null,
+        kind: "item",
       },
     ]);
     requestAnimationFrame(() =>
@@ -1644,9 +1692,11 @@ function ReceiptEditor({ id }: { id: string }) {
     if (!total && total !== 0)
       nextErrors.total = "Enter a valid non-negative EUR amount.";
     const lineItems = values.items.map((item, index) => {
-      const lineTotal = parseMoney(item.lineTotal);
+      const lineTotal = parseSignedMoneyInput(item.lineTotal);
       const quantity = item.quantity ? parseQuantity(item.quantity) : null;
-      const unitPrice = item.unitPrice ? parseMoney(item.unitPrice) : null;
+      const unitPrice = item.unitPrice
+        ? parseSignedMoneyInput(item.unitPrice)
+        : null;
       if (!item.description.trim())
         nextErrors[`item-${index}-description`] = "Enter a description.";
       if (lineTotal === null)
@@ -1663,6 +1713,7 @@ function ReceiptEditor({ id }: { id: string }) {
         unitPriceCents: unitPrice,
         lineTotalCents: lineTotal ?? 0,
         categoryId: item.categoryId ?? null,
+        kind: item.kind,
       };
     });
     setErrors(nextErrors);
@@ -1770,6 +1821,27 @@ function ReceiptEditor({ id }: { id: string }) {
   const enteredTotal = parseMoney(values.total);
   const discrepancy =
     sum !== null && enteredTotal !== null && sum !== enteredTotal;
+  const ordinaryItems = values.items.filter((item) =>
+    ["item", "unknown"].includes(item.kind),
+  );
+  const categorizedItems = ordinaryItems.filter((item) => item.categoryId);
+  const coverage = ordinaryItems.length
+    ? Math.round((categorizedItems.length / ordinaryItems.length) * 100)
+    : null;
+  const specialKinds = [
+    ["discount", "discount"],
+    ["return", "return"],
+    ["deposit", "deposit"],
+    ["deposit_refund", "deposit refund"],
+  ] as const;
+  const specialSummary = specialKinds
+    .map(([kind, label]) => {
+      const count = values.items.filter((item) => item.kind === kind).length;
+      return count ? `${count} ${label}${count === 1 ? "" : "s"}` : null;
+    })
+    .filter((value): value is string => value !== null)
+    .join(" · ");
+  const composition = receiptComposition(values, categories);
   return (
     <section className="editor">
       <div className="breadcrumb">
@@ -1797,6 +1869,43 @@ function ReceiptEditor({ id }: { id: string }) {
           </button>
         </div>
       </div>
+      <section
+        className="receipt-summary-strip panel"
+        aria-label="Receipt summary"
+      >
+        <div>
+          <span>Receipt total</span>
+          <strong>
+            {enteredTotal === null
+              ? "Not available"
+              : money.format(enteredTotal / 100)}
+          </strong>
+        </div>
+        <div>
+          <span>Line items</span>
+          <strong>{values.items.length}</strong>
+          {specialSummary && <small>{specialSummary}</small>}
+        </div>
+        <div>
+          <span>Tax</span>
+          <strong>
+            {values.taxCents === null
+              ? "Not available"
+              : money.format(values.taxCents / 100)}
+          </strong>
+        </div>
+        <div>
+          <span>Categorized coverage</span>
+          <strong>
+            {coverage === null ? "Not available" : `${coverage}%`}
+          </strong>
+          <small>
+            {ordinaryItems.length
+              ? `${categorizedItems.length} of ${ordinaryItems.length} item rows`
+              : "No item rows"}
+          </small>
+        </div>
+      </section>
       <div className="editor-grid">
         <div>
           <section
@@ -2243,29 +2352,35 @@ function ReceiptEditor({ id }: { id: string }) {
             )}
           </section>
         </div>
-        <aside className="panel totals" aria-label="Receipt totals">
-          <p>
-            Entered total{" "}
-            <strong>
-              {enteredTotal === null ? "—" : money.format(enteredTotal / 100)}
-            </strong>
-          </p>
-          <p>
-            Line-item sum{" "}
-            <strong>{sum === null ? "—" : money.format(sum / 100)}</strong>
-          </p>
-          <div
-            className={`reconcile ${discrepancy ? "reconcile--different" : ""}`}
-            role="status"
-          >
-            {discrepancy
-              ? `Difference: ${money.format(Math.abs(enteredTotal - sum) / 100)}`
-              : "Totals match"}
-          </div>
-          <div className="save-status" aria-live="polite">
-            {status || (dirty ? "Unsaved changes" : "All changes saved")}
-          </div>
-        </aside>
+        <div className="editor-sidebar">
+          <aside className="panel totals" aria-label="Receipt totals">
+            <p>
+              Entered total{" "}
+              <strong>
+                {enteredTotal === null ? "—" : money.format(enteredTotal / 100)}
+              </strong>
+            </p>
+            <p>
+              Line-item sum{" "}
+              <strong>{sum === null ? "—" : money.format(sum / 100)}</strong>
+            </p>
+            <div
+              className={`reconcile ${discrepancy ? "reconcile--different" : ""}`}
+              role="status"
+            >
+              {discrepancy
+                ? `Difference: ${money.format(Math.abs(enteredTotal - sum) / 100)}`
+                : "Totals match"}
+            </div>
+            <div className="save-status" aria-live="polite">
+              {status || (dirty ? "Unsaved changes" : "All changes saved")}
+            </div>
+          </aside>
+          <CategoryComposition
+            title="Receipt composition"
+            buckets={composition}
+          />
+        </div>
       </div>
       <div className="review-workspace">
         <AIReviewPanel
