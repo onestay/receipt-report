@@ -219,7 +219,7 @@ describe("spending insights", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "This month" }));
     await waitFor(() => expect(from).toHaveValue("01.08.2026"));
-    expect(from).not.toHaveAttribute("aria-invalid");
+    expect(from).toHaveAttribute("aria-invalid", "false");
     expect(screen.queryByText(/Enter a valid date/)).not.toBeInTheDocument();
   });
 
