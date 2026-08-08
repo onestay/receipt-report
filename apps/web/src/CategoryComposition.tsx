@@ -19,6 +19,7 @@ export type CompositionBucket = {
   key: string;
   label: string;
   signedCents: number;
+  receiptCount?: number | undefined;
   drillDownUrl?: string | undefined;
 };
 
@@ -78,6 +79,12 @@ export function buildComposition(
         (total, bucket) => total + bucket.signedCents,
         0,
       ),
+      receiptCount: grouped.every((bucket) => bucket.receiptCount !== undefined)
+        ? grouped.reduce(
+            (total, bucket) => total + (bucket.receiptCount ?? 0),
+            0,
+          )
+        : undefined,
       members: grouped,
     });
   represented.sort(compareBuckets);
@@ -167,6 +174,8 @@ export function CategoryComposition({
                   <span>
                     {euros.format(slice.signedCents / 100)} ·{" "}
                     {slice.percentage.toFixed(1)}%
+                    {slice.receiptCount !== undefined &&
+                      ` · ${slice.receiptCount} ${slice.receiptCount === 1 ? "receipt" : "receipts"}`}
                   </span>
                   {slice.members && (
                     <details>
@@ -178,6 +187,8 @@ export function CategoryComposition({
                           <li key={member.key}>
                             {member.label}:{" "}
                             {euros.format(member.signedCents / 100)}
+                            {member.receiptCount !== undefined &&
+                              ` · ${member.receiptCount} ${member.receiptCount === 1 ? "receipt" : "receipts"}`}
                           </li>
                         ))}
                       </ul>
@@ -197,8 +208,16 @@ export function CategoryComposition({
           <ul>
             {model.reductions.map((bucket) => (
               <li key={bucket.key}>
-                <span>{bucket.label}</span>
-                <strong>{euros.format(bucket.signedCents / 100)}</strong>
+                {bucket.drillDownUrl ? (
+                  <a href={bucket.drillDownUrl}>{bucket.label}</a>
+                ) : (
+                  <span>{bucket.label}</span>
+                )}
+                <strong>
+                  {euros.format(bucket.signedCents / 100)}
+                  {bucket.receiptCount !== undefined &&
+                    ` · ${bucket.receiptCount} ${bucket.receiptCount === 1 ? "receipt" : "receipts"}`}
+                </strong>
               </li>
             ))}
           </ul>

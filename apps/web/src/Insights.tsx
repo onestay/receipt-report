@@ -604,6 +604,7 @@ export function Insights({ clock = currentTime }: { clock?: () => Date }) {
                 key: item.key,
                 label: item.label,
                 signedCents: item.grossCents,
+                receiptCount: item.receiptCount,
                 drillDownUrl: receiptHref(item.drillDownUrl),
               }))}
             />

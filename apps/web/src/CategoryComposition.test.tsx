@@ -69,6 +69,7 @@ describe("category composition", () => {
             key: "food",
             label: "Food",
             signedCents: 750,
+            receiptCount: 2,
             drillDownUrl: "/receipts?category=food",
           },
           { key: "household", label: "Household", signedCents: 250 },
@@ -82,12 +83,20 @@ describe("category composition", () => {
       "href",
       "/receipts?category=food",
     );
-    expect(screen.getByText("7,50 € · 75.0%")).toBeVisible();
+    expect(screen.getByText("7,50 € · 75.0% · 2 receipts")).toBeVisible();
 
     rerender(
       <CategoryComposition
         title="Categories"
-        buckets={[{ key: "returns", label: "Returns", signedCents: -300 }]}
+        buckets={[
+          {
+            key: "returns",
+            label: "Returns",
+            signedCents: -300,
+            receiptCount: 1,
+            drillDownUrl: "/receipts?category=returns",
+          },
+        ]}
       />,
     );
     expect(screen.getByText("No positive composition to chart.")).toBeVisible();
@@ -96,6 +105,10 @@ describe("category composition", () => {
     }).parentElement;
     if (!reductions) throw new Error("reductions missing");
     expect(within(reductions).getByText(/-3,00/)).toBeVisible();
+    expect(within(reductions).getByText(/1 receipt/)).toBeVisible();
+    expect(
+      within(reductions).getByRole("link", { name: "Returns" }),
+    ).toHaveAttribute("href", "/receipts?category=returns");
   });
 
   it("exposes grouped Other members in expandable text", () => {
