@@ -39,6 +39,12 @@ import {
 } from "./DocumentPanel.js";
 import { AIReviewPanel, ReceiptLifecycleBadge } from "./AIReviewPanel.js";
 import { Insights } from "./Insights.js";
+import {
+  DateField,
+  dateRangeError,
+  displayDate,
+  parseDateInput,
+} from "./DateField.js";
 
 type Route = {
   page:
@@ -176,6 +182,7 @@ function ExtractionQuality() {
     typeof correctionQualitySummarySchema.parse
   > | null>(null);
   const [error, setError] = useState(false);
+  const [dateErrors, setDateErrors] = useState<Record<string, string>>({});
   const [filterDraft, setFilterDraft] = useState({
     profileVersion: "",
     provider: "",
@@ -186,8 +193,14 @@ function ExtractionQuality() {
   });
   const [filters, setFilters] = useState(filterDraft);
   useEffect(() => {
+    const from = parseDateInput(filters.from, false);
+    const to = parseDateInput(filters.to, false);
     const parameters = new URLSearchParams(
-      Object.entries(filters).filter((entry) => entry[1]),
+      Object.entries({
+        ...filters,
+        from: from.iso ?? "",
+        to: to.iso ?? "",
+      }).filter((entry) => entry[1]),
     );
     setError(false);
     void fetch(
@@ -211,6 +224,19 @@ function ExtractionQuality() {
         className="quality-filters panel"
         onSubmit={(event) => {
           event.preventDefault();
+          const from = parseDateInput(filterDraft.from, false);
+          const to = parseDateInput(filterDraft.to, false);
+          const range =
+            !from.error && !to.error && from.iso && to.iso
+              ? dateRangeError(filterDraft.from, filterDraft.to)
+              : null;
+          const nextErrors = {
+            ...(from.error ? { from: from.error } : {}),
+            ...(to.error ? { to: to.error } : {}),
+            ...(range ? { to: range } : {}),
+          };
+          setDateErrors(nextErrors);
+          if (Object.keys(nextErrors).length) return;
           setSummary(null);
           setFilters(filterDraft);
         }}
@@ -235,16 +261,18 @@ function ExtractionQuality() {
           </label>
         ))}
         {(["from", "to"] as const).map((name) => (
-          <label key={name}>
-            <span>{name === "from" ? "From" : "To"}</span>
-            <input
-              type="date"
-              value={filterDraft[name]}
-              onChange={(event) =>
-                setFilterDraft({ ...filterDraft, [name]: event.target.value })
-              }
-            />
-          </label>
+          <DateField
+            key={name}
+            id={`quality-${name}`}
+            label={name === "from" ? "From" : "To"}
+            required={false}
+            value={filterDraft[name]}
+            error={dateErrors[name]}
+            className="quality-date-field"
+            onChange={(value) =>
+              setFilterDraft({ ...filterDraft, [name]: value })
+            }
+          />
         ))}
         <button className="button button--small" type="submit">
           Apply filters
@@ -926,8 +954,9 @@ function CreateReceipt() {
     if (!manualEntry && !documentFile)
       next.document = "Choose a receipt image or PDF.";
     if (manualEntry) {
+      const parsedDate = parseDateInput(purchaseDate);
       if (!normalizedMerchant) next.merchantRaw = "Enter a merchant.";
-      if (!purchaseDate) next.purchaseDate = "Choose a purchase date.";
+      if (parsedDate.error) next.purchaseDate = parsedDate.error;
       if (total === null)
         next.total = "Enter euros with up to two decimal places.";
     }
@@ -945,7 +974,7 @@ function CreateReceipt() {
           ? merchantIdentity
           : { merchantBrandId: null, merchantStoreId: null }),
         purchaseDate: manualEntry
-          ? purchaseDate
+          ? (parseDateInput(purchaseDate).iso ?? "")
           : new Date().toISOString().slice(0, 10),
         purchaseTime: manualEntry ? purchaseTime || null : null,
         totalCents: manualEntry ? total : 0,
@@ -1147,25 +1176,13 @@ function CreateReceipt() {
               value={merchantIdentity}
               onChange={setMerchantIdentity}
             />
-            <div className="field">
-              <label htmlFor="purchaseDate">Purchase date</label>
-              <input
-                id="purchaseDate"
-                name="purchaseDate"
-                type="date"
-                value={purchaseDate}
-                onChange={(event) => setPurchaseDate(event.target.value)}
-                aria-invalid={!!errors.purchaseDate}
-                aria-describedby={
-                  errors.purchaseDate ? "purchaseDate-error" : undefined
-                }
-              />
-              {errors.purchaseDate && (
-                <small id="purchaseDate-error" className="field-error">
-                  {errors.purchaseDate}
-                </small>
-              )}
-            </div>
+            <DateField
+              id="purchaseDate"
+              label="Purchase date"
+              value={purchaseDate}
+              error={errors.purchaseDate}
+              onChange={setPurchaseDate}
+            />
             <div className="field">
               <label htmlFor="purchaseTime">
                 Time <span>optional</span>
@@ -1287,7 +1304,7 @@ function editorValues(receipt: ReceiptDetail): EditorValues {
     merchantStoreId: receipt.merchantStore?.id ?? null,
     merchantBrandName: receipt.merchantBrand?.name ?? "",
     merchantStoreName: receipt.merchantStore?.name ?? "",
-    purchaseDate: receipt.purchaseDate,
+    purchaseDate: displayDate(receipt.purchaseDate),
     purchaseTime: receipt.purchaseTime ?? "",
     total: centsInput(receipt.totalCents),
     notes: receipt.notes ?? "",
@@ -1620,8 +1637,10 @@ function ReceiptEditor({ id }: { id: string }) {
   async function save() {
     const nextErrors: Record<string, string> = {};
     const total = parseMoney(values.total);
+    const purchaseDate = parseDateInput(values.purchaseDate);
     if (!values.merchantRaw.trim())
       nextErrors.merchantRaw = "Enter a merchant.";
+    if (purchaseDate.error) nextErrors.purchaseDate = purchaseDate.error;
     if (!total && total !== 0)
       nextErrors.total = "Enter a valid non-negative EUR amount.";
     const lineItems = values.items.map((item, index) => {
@@ -1661,7 +1680,7 @@ function ReceiptEditor({ id }: { id: string }) {
           merchantRaw: values.merchantRaw,
           merchantBrandId: values.merchantBrandId,
           merchantStoreId: values.merchantStoreId,
-          purchaseDate: values.purchaseDate,
+          purchaseDate: purchaseDate.iso,
           purchaseTime: values.purchaseTime || null,
           totalCents: total,
           notes: values.notes || null,
@@ -1805,11 +1824,11 @@ function ReceiptEditor({ id }: { id: string }) {
               selectedBrandName={values.merchantBrandName}
               selectedStoreName={values.merchantStoreName}
             />
-            <EditorField
+            <DateField
               label="Purchase date"
               id="editor-date"
-              type="date"
               value={values.purchaseDate}
+              error={errors.purchaseDate}
               onChange={(value) => update("purchaseDate", value)}
             />
             <EditorField

@@ -126,7 +126,7 @@ describe("application shell", () => {
     fireEvent.change(screen.getByLabelText("Model"), {
       target: { value: "fake-v1" },
     });
-    fireEvent.change(screen.getByLabelText("From"), {
+    fireEvent.change(screen.getByLabelText("From (optional)"), {
       target: { value: "2026-08-01" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
