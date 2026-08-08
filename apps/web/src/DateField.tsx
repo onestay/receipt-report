@@ -94,7 +94,7 @@ export function DateField({
         <input
           id={id}
           name={id}
-          aria-label={label}
+          aria-label={required ? label : `${label} (optional)`}
           value={value}
           placeholder="DD.MM.YYYY"
           inputMode="numeric"

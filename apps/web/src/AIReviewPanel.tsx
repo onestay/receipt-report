@@ -477,7 +477,7 @@ export function AIReviewPanel({
   async function approve() {
     const accepted = snapshot();
     if (!accepted)
-      return announce("Correct the invalid proposal amounts first.", true);
+      return announce("Correct the invalid proposal fields first.", true);
     if (canonicalDirty)
       return announce(
         "Save or discard canonical receipt edits before approval.",

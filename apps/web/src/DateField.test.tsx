@@ -58,6 +58,21 @@ describe("German date fields", () => {
     expect(onChange).toHaveBeenLastCalledWith("03.08.2026");
   });
 
+  it("announces optional date fields", () => {
+    render(
+      <DateField
+        id="from"
+        label="From"
+        value=""
+        required={false}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByRole("textbox", { name: "From (optional)" }),
+    ).toBeVisible();
+  });
+
   it("exposes an accessible native picker when supported", async () => {
     const showPicker = vi.fn();
     Object.defineProperty(HTMLInputElement.prototype, "showPicker", {
