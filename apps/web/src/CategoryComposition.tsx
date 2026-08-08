@@ -81,7 +81,7 @@ export function buildComposition(
       ),
       receiptCount: grouped.every((bucket) => bucket.receiptCount !== undefined)
         ? grouped.reduce(
-            (total, bucket) => total + (bucket.receiptCount ?? 0),
+            (total, bucket) => total + Number(bucket.receiptCount),
             0,
           )
         : undefined,

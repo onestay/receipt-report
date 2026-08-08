@@ -36,6 +36,7 @@ describe("category composition", () => {
         key: `category-${index}`,
         label: `Category ${index}`,
         signedCents: index < 2 ? 100 : 100 - index,
+        receiptCount: index + 1,
       }),
     );
     const model = buildComposition([
@@ -51,6 +52,9 @@ describe("category composition", () => {
     expect(
       model.positive.find((item) => item.key === "other")?.members,
     ).toHaveLength(3);
+    expect(
+      model.positive.find((item) => item.key === "other")?.receiptCount,
+    ).toBe(21);
     expect(model.positive.some((item) => item.key === "uncategorized")).toBe(
       true,
     );
@@ -119,12 +123,13 @@ describe("category composition", () => {
           key: `category-${index}`,
           label: `Category ${index}`,
           signedCents: 100 - index,
+          receiptCount: index + 1,
         }))}
       />,
     );
     const summary = screen.getByText("Other contains 2 categories");
     fireEvent.click(summary);
-    expect(screen.getByText(/Category 5:/)).toBeVisible();
+    expect(screen.getByText(/Category 5:.*6 receipts/)).toBeVisible();
     expect(screen.getByText(/Category 6:/)).toBeVisible();
   });
 });
