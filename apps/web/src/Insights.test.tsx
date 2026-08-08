@@ -200,6 +200,29 @@ describe("spending insights", () => {
     ).toHaveLength(2);
   });
 
+  it("clears stale date errors when applying a preset", async () => {
+    history.replaceState({}, "", "/insights?from=2026-01-01&to=2026-12-31");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) =>
+        Promise.resolve(supportingFetch(String(input)) ?? response(baseReport)),
+      ),
+    );
+    render(<Insights clock={() => new Date("2026-08-06T12:00:00Z")} />);
+    await screen.findAllByText(/123,45/);
+
+    const from = screen.getByLabelText("From");
+    fireEvent.change(from, { target: { value: "31.02.2026" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    expect(from).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText(/Enter a valid date/)).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "This month" }));
+    await waitFor(() => expect(from).toHaveValue("01.08.2026"));
+    expect(from).not.toHaveAttribute("aria-invalid");
+    expect(screen.queryByText(/Enter a valid date/)).not.toBeInTheDocument();
+  });
+
   it("treats a one-sided URL range as invalid Custom state", async () => {
     history.replaceState({}, "", "/insights?from=2026-01-01");
     vi.stubGlobal(

@@ -24,6 +24,8 @@ const euros = new Intl.NumberFormat("de-DE", {
   currency: "EUR",
 });
 
+const currentTime = () => new Date();
+
 function defaults() {
   const today = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Europe/Berlin",
@@ -211,7 +213,7 @@ function Breakdown({
   );
 }
 
-export function Insights({ clock = () => new Date() }: { clock?: () => Date }) {
+export function Insights({ clock = currentTime }: { clock?: () => Date }) {
   const [search, setSearch] = useState(location.search);
   const parsed = useMemo(() => readFilters(search), [search]);
   const [draft, setDraft] = useState(() => draftFrom(parsed.query));
@@ -343,6 +345,7 @@ export function Insights({ clock = () => new Date() }: { clock?: () => Date }) {
   }
 
   function applyPreset(preset: PeriodPreset) {
+    setDateErrors({});
     const parameters = new URLSearchParams();
     for (const [key, value] of Object.entries({
       ...parsed.query,
