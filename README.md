@@ -201,6 +201,31 @@ boundaries, Docker/jq queries, and investigation playbooks.
 | `LOG_SENSITIVE_PROVIDER_ERRORS` | worker      | `false` | Explicitly permits a capped 16 KiB non-2xx provider error body in console logs. This may contain sensitive provider or receipt data. |
 | `LOG_SLOW_OPERATION_MS`         | API, worker | `1000`  | Positive duration threshold for slow database, storage, and provider-operation warnings.                                             |
 
+### Dedicated mailbox import
+
+Email import is disabled by default. Use a dedicated mailbox or folder with the
+least privileges available and an app password where supported. The worker uses
+verified TLS, reads only MIME structure and explicit attachment parts, and never
+changes flags, moves, or deletes messages. Keep all credential variables in the
+worker-only secrets file.
+
+| Variable                          | Used by | Default               | Purpose                                                         |
+| --------------------------------- | ------- | --------------------- | --------------------------------------------------------------- |
+| `EMAIL_IMPORT_ENABLED`            | worker  | `false`               | Enables polling; incomplete configuration fails worker startup. |
+| `EMAIL_IMPORT_HOST`               | worker  | required when enabled | IMAP server hostname.                                           |
+| `EMAIL_IMPORT_PORT`               | worker  | `993`                 | TLS IMAP port.                                                  |
+| `EMAIL_IMPORT_USERNAME`           | worker  | required when enabled | Dedicated mailbox login.                                        |
+| `EMAIL_IMPORT_PASSWORD`           | worker  | required when enabled | Password or app password; worker-only secret.                   |
+| `EMAIL_IMPORT_FOLDER`             | worker  | `INBOX`               | Single ingestion folder.                                        |
+| `EMAIL_IMPORT_POLL_MS`            | worker  | `60000`               | Delay between mailbox polls.                                    |
+| `EMAIL_IMPORT_COMMAND_TIMEOUT_MS` | worker  | `30000`               | Connection and socket inactivity timeout.                       |
+| `EMAIL_IMPORT_MAX_MESSAGES`       | worker  | `50`                  | Maximum discovered messages per poll.                           |
+| `EMAIL_IMPORT_MAX_ATTACHMENTS`    | worker  | `50`                  | Maximum downloaded attachments per poll.                        |
+| `EMAIL_IMPORT_LEASE_MS`           | worker  | `120000`              | Expiring attachment claim lease.                                |
+| `EMAIL_IMPORT_MAX_ATTEMPTS`       | worker  | `5`                   | Maximum retryable download attempts.                            |
+| `EMAIL_IMPORT_RETRY_BASE_MS`      | worker  | `5000`                | Initial capped exponential retry delay.                         |
+| `EMAIL_IMPORT_RETRY_MAX_MS`       | worker  | `300000`              | Maximum retry delay.                                            |
+
 ### Production Compose selection
 
 These variables are consumed by `compose.production.yaml`, not parsed by the

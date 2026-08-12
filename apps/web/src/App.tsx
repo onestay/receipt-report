@@ -13,6 +13,7 @@ import {
   receiptDocumentResponseSchema,
   receiptDetailSchema,
   receiptListSchema,
+  UPLOAD_PLACEHOLDER_RECEIPT,
   type MerchantBrand,
   type MerchantStore,
   type Category,
@@ -983,7 +984,9 @@ function CreateReceipt() {
     setServerError("");
     try {
       const body = {
-        merchantRaw: manualEntry ? normalizedMerchant : "Pending AI extraction",
+        merchantRaw: manualEntry
+          ? normalizedMerchant
+          : UPLOAD_PLACEHOLDER_RECEIPT.merchantRaw,
         ...(manualEntry
           ? merchantIdentity
           : { merchantBrandId: null, merchantStoreId: null }),
@@ -991,7 +994,7 @@ function CreateReceipt() {
           ? (parseDateInput(purchaseDate).iso ?? "")
           : new Date().toISOString().slice(0, 10),
         purchaseTime: manualEntry ? purchaseTime || null : null,
-        totalCents: manualEntry ? total : 0,
+        totalCents: manualEntry ? total : UPLOAD_PLACEHOLDER_RECEIPT.totalCents,
         notes: manualEntry ? notes || null : null,
       };
       let receiptId = createdReceiptId;

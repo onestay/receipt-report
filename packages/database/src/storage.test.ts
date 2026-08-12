@@ -164,6 +164,74 @@ describe("filesystem document storage", () => {
 });
 
 describe("document persistence coordinator", () => {
+  it("can create the required receipt before the document in one transaction", async () => {
+    const staged = await storage.stage(new Uint8Array([1, 2, 3]));
+    const document = await persistOriginalDocument(
+      db(),
+      storage,
+      {
+        stagedRelativePath: staged,
+        originalFilename: "mail.pdf",
+        mediaType: "application/pdf",
+        byteSize: 3,
+        sha256: "f".repeat(64),
+      },
+      {
+        beforeDocument: async (transaction) => {
+          const receipt = await transaction.receipt.create({
+            data: {
+              merchantRaw: "Pending AI extraction",
+              purchaseDate: "2026-08-12",
+              totalCents: 0,
+            },
+          });
+          return receipt.id;
+        },
+      },
+    );
+
+    const stored = await db().receiptDocument.findUniqueOrThrow({
+      where: { id: document.id },
+      include: { receipt: true },
+    });
+    expect(stored.receipt.merchantRaw).toBe("Pending AI extraction");
+  });
+
+  it("rolls back a receipt created by the pre-document hook on failure", async () => {
+    const staged = await storage.stage(new Uint8Array([1]));
+    await expect(
+      persistOriginalDocument(
+        db(),
+        storage,
+        {
+          stagedRelativePath: staged,
+          originalFilename: null,
+          mediaType: "application/pdf",
+          byteSize: 1,
+          sha256: "0".repeat(64),
+        },
+        {
+          beforeDocument: async (transaction) => {
+            const receipt = await transaction.receipt.create({
+              data: {
+                merchantRaw: "ROLLBACK MARKER",
+                purchaseDate: "2026-08-12",
+                totalCents: 0,
+              },
+            });
+            return receipt.id;
+          },
+          insideTransaction: async () => {
+            throw new Error("injected transaction failure");
+          },
+        },
+      ),
+    ).rejects.toThrow("injected transaction failure");
+    expect(
+      await db().receipt.count({ where: { merchantRaw: "ROLLBACK MARKER" } }),
+    ).toBe(0);
+  });
+
   it("publishes a file and metadata together", async () => {
     const receipt = await db().receipt.create({
       data: {

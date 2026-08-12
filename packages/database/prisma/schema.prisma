@@ -65,6 +65,7 @@ model Receipt {
   document            ReceiptDocument?
   extractionProposals ExtractionProposal[]
   correctionEvents    CorrectionEvent[]
+  emailAttachments    EmailAttachmentImport[]
 
   @@index([purchaseDate, id])
   @@index([merchantBrandId])
@@ -94,8 +95,73 @@ model ReceiptDocument {
   normalizationJob            NormalizationJob?
   extractionJobs              ExtractionJob[]
   extractionProposals         ExtractionProposal[]
+  emailAttachments            EmailAttachmentImport[]
 
   @@unique([sha256, byteSize])
+}
+
+model EmailImportCursor {
+  id             String   @id @default(cuid())
+  accountKey     String
+  mailboxKey     String
+  uidValidity    String
+  lastUid        Int      @default(0)
+  lastSuccessfulPollAt DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  messages       EmailMessageImport[]
+
+  @@unique([accountKey, mailboxKey, uidValidity])
+  @@index([accountKey, mailboxKey, updatedAt])
+}
+
+model EmailImporterHealth {
+  id                   String   @id
+  enabled              Boolean  @default(false)
+  lastSuccessfulPollAt DateTime?
+  updatedAt            DateTime @updatedAt
+}
+
+model EmailMessageImport {
+  id             String   @id @default(cuid())
+  cursorId       String
+  cursor         EmailImportCursor @relation(fields: [cursorId], references: [id], onDelete: Restrict)
+  uid            Int
+  status         String   @default("discovered")
+  failureCode    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  attachments    EmailAttachmentImport[]
+
+  @@unique([cursorId, uid])
+  @@index([status, updatedAt])
+}
+
+model EmailAttachmentImport {
+  id               String   @id @default(cuid())
+  messageId        String
+  message          EmailMessageImport @relation(fields: [messageId], references: [id], onDelete: Restrict)
+  partId           String
+  ordinal          Int
+  originalFilename String?
+  status           String   @default("pending")
+  attempts         Int      @default(0)
+  availableAt      DateTime @default(now())
+  claimedAt        DateTime?
+  leaseExpiresAt   DateTime?
+  claimToken       String?  @unique
+  failureCode      String?
+  sha256           String?
+  byteSize         Int?
+  receiptId        String?
+  receipt           Receipt? @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+  documentId       String?
+  document          ReceiptDocument? @relation(fields: [documentId], references: [id], onDelete: Restrict)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([messageId, partId])
+  @@index([status, availableAt, id])
 }
 
 model ReceiptPage {
