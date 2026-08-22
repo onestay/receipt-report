@@ -14,6 +14,7 @@ import {
   parseRetryAfterMs,
   reconcileExtractionTotals,
   receiptExtractionSchema,
+  type ExtractionCategoryOption,
   type ExtractionRequest,
   type ReceiptExtraction,
 } from "./index.js";
@@ -264,6 +265,64 @@ async function fakeProvider(
   return `http://127.0.0.1:${address.port}/v1/`;
 }
 
+/**
+ * Object shapes the provider must compile in place, i.e. everything reachable
+ * without following a `$ref` and outside the `$defs` container.
+ */
+function inlineObjectShapes(node: unknown, insideDefs = false): string[] {
+  if (Array.isArray(node))
+    return node.flatMap((entry) => inlineObjectShapes(entry, insideDefs));
+  if (node === null || typeof node !== "object") return [];
+  const record = node as Record<string, unknown>;
+  const shapes =
+    !insideDefs && "properties" in record ? [JSON.stringify(record)] : [];
+  for (const [key, value] of Object.entries(record))
+    shapes.push(...inlineObjectShapes(value, insideDefs || key === "$defs"));
+  return shapes;
+}
+
+/** Every `#/$defs/<name>` target referenced anywhere in a schema. */
+function referencedDefinitionNames(node: unknown): string[] {
+  if (Array.isArray(node))
+    return node.flatMap((entry) => referencedDefinitionNames(entry));
+  if (node === null || typeof node !== "object") return [];
+  return Object.entries(node as Record<string, unknown>).flatMap(
+    ([key, value]) =>
+      key === "$ref" && typeof value === "string"
+        ? [value.replace("#/$defs/", "")]
+        : referencedDefinitionNames(value),
+  );
+}
+
+/** Captures the strict schema the adapter actually puts on the wire. */
+async function captureProviderSchema(
+  categoryOptions: ExtractionCategoryOption[] = [],
+): Promise<Record<string, unknown>> {
+  let schema: unknown;
+  const transport = vi.fn<typeof fetch>(async (_url, init) => {
+    const body = JSON.parse(String(init?.body)) as {
+      response_format: { json_schema: { schema: unknown } };
+    };
+    schema = body.response_format.json_schema.schema;
+    return new Response(providerEnvelope(validExtraction()));
+  });
+  await adapter("https://provider.invalid/v1/", { fetch: transport }).extract({
+    ...request,
+    ...(categoryOptions.length > 0 ? { categoryOptions } : {}),
+  });
+  return schema as Record<string, unknown>;
+}
+
+/** Counts fields referencing a union-typed shared definition. */
+function unionTypedFieldCount(body: string): number {
+  return ["nullableText", "nullableInteger", "nullableDate", "nullableTime"]
+    .map(
+      (name) =>
+        (body.match(new RegExp(`#/\\$defs/${name}"`, "g")) ?? []).length,
+    )
+    .reduce((sum, count) => sum + count, 0);
+}
+
 function providerEnvelope(extraction: unknown): string {
   return JSON.stringify({
     choices: [{ message: { content: JSON.stringify(extraction) } }],
@@ -423,11 +482,55 @@ describe("OpenAI-compatible adapter", () => {
     expect(captured?.body).toContain(
       '"confidence":{"enum":[0,0.25,0.5,0.75,1,null]}',
     );
-    // The provider caps a strict schema at 16 union-typed parameters. Pin the
-    // exact count: spending more of that budget should be a deliberate change.
+    // Field shapes are stated once and referenced. Inlining a copy per field
+    // makes the compiled strict grammar too large for the provider to accept.
+    expect(captured?.body).toContain('"$defs"');
+    const fieldShapeCount = (
+      captured?.body.match(/"confidence":\{"enum"/g) ?? []
+    ).length;
+    expect(fieldShapeCount).toBe(7);
+    // The provider caps a strict schema at 16 union-typed parameters. Sharing
+    // the shapes states each union once, but the budget is spent per
+    // referencing field, so pin both counts: spending more of that budget
+    // should be a deliberate change.
     const unionCount = (captured?.body.match(/"type":\[/g) ?? []).length;
-    expect(unionCount).toBe(14);
+    expect(unionCount).toBe(4);
+    expect(unionTypedFieldCount(captured?.body ?? "")).toBe(14);
     expect(germanReceiptProfile.systemPrompt).toContain("Erfinde keine");
+  });
+
+  // The provider compiles a strict schema into a grammar and rejects the
+  // request outright once that grammar grows too large. The threshold is
+  // provider-side and undocumented, so these assert the property that was
+  // observed to cross it: repeated shapes stated once instead of inlined.
+  // A live check against the real limit lives in provider-schema.live.test.ts.
+  it("states every repeated object shape once instead of inlining copies", async () => {
+    const categoryOptions = Array.from({ length: 500 }, (_, index) => ({
+      token: `c${index}`,
+      categoryId: `category-${index}`,
+      path: `Synthetic > Category ${index}`,
+    }));
+    for (const options of [[], categoryOptions]) {
+      const schema = await captureProviderSchema(options);
+      const shapes = inlineObjectShapes(schema);
+      const duplicated = shapes.filter(
+        (shape, index) => shapes.indexOf(shape) !== index,
+      );
+      expect(duplicated).toEqual([]);
+      // Root, line item, and tax breakdown. Every field shape is a reference.
+      expect(shapes).toHaveLength(3);
+    }
+  });
+
+  it("resolves every reference against a declared definition", async () => {
+    const schema = await captureProviderSchema();
+    const definitions = Object.keys(
+      (schema as { $defs: Record<string, unknown> }).$defs,
+    );
+    const referenced = referencedDefinitionNames(schema);
+    // Equality both ways: a dangling reference is a provider-side 400 rather
+    // than a type error, and an unreferenced definition is dead schema.
+    expect([...new Set(referenced)].sort()).toEqual([...definitions].sort());
   });
 
   it("keeps the maximum category-token enum compact", async () => {
@@ -455,15 +558,9 @@ describe("OpenAI-compatible adapter", () => {
       response_format: {
         json_schema: {
           schema: {
-            properties: {
-              lineItems: {
-                items: {
-                  properties: {
-                    categoryToken: {
-                      properties: { value: { enum: unknown[] } };
-                    };
-                  };
-                };
+            $defs: {
+              nullableCategoryToken: {
+                properties: { value: { enum: unknown[] } };
               };
             };
           };
@@ -471,11 +568,12 @@ describe("OpenAI-compatible adapter", () => {
       };
     };
     const values =
-      body.response_format.json_schema.schema.properties.lineItems.items
-        .properties.categoryToken.properties.value.enum;
+      body.response_format.json_schema.schema.$defs.nullableCategoryToken
+        .properties.value.enum;
     expect(values).toHaveLength(501);
     expect(JSON.stringify(values).length).toBeLessThan(3_500);
-    expect((captured.match(/"type":\[/g) ?? []).length).toBe(14);
+    expect((captured.match(/"type":\[/g) ?? []).length).toBe(4);
+    expect(unionTypedFieldCount(captured)).toBe(14);
   });
 
   it("rejects page and byte limits before calling the provider", async () => {

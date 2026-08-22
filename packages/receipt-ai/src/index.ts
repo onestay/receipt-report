@@ -294,11 +294,39 @@ function nullableFieldSchema(
   };
 }
 
-const signedCentsJsonSchema = { type: "integer" } as const;
-const nonNegativeCentsJsonSchema = {
-  type: "integer",
-  minimum: 0,
+/**
+ * Extracted-field shapes, shared through `$defs`. The provider compiles a
+ * `strict` schema into a grammar and rejects the whole document when every
+ * field inlines its own copy of these seven shapes. Bounds are absent because
+ * `stripUnsupportedJsonSchemaKeywords` removes them anyway, which is what lets
+ * every integer field share one definition; `receiptExtractionSchema` still
+ * enforces them when the reply is parsed.
+ */
+const fieldDefinitions = {
+  nullableText: nullableFieldSchema({ type: "string" }),
+  nullableInteger: nullableFieldSchema({ type: "integer" }),
+  // Patterns mirror receiptDateSchema/receiptTimeSchema so the provider
+  // constrains the reply instead of it failing validation on arrival.
+  nullableDate: nullableFieldSchema({
+    type: "string",
+    pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+  }),
+  nullableTime: nullableFieldSchema({
+    type: "string",
+    pattern: "^([01]\\d|2[0-3]):[0-5]\\d$",
+  }),
+  nullableCurrency: nullableFieldSchema({ type: "string", const: "EUR" }),
+  nullableUnit: nullableFieldSchema({
+    type: "string",
+    enum: ["piece", "kg", "g", "l", "ml", "unknown"],
+  }),
+  nullableCategoryToken: nullableFieldSchema({ type: "string", enum: [] }),
 } as const;
+
+function fieldRef(name: keyof typeof fieldDefinitions) {
+  return { $ref: `#/$defs/${name}` } as const;
+}
+
 const lineItemJsonSchema = {
   type: "object",
   additionalProperties: false,
@@ -313,15 +341,12 @@ const lineItemJsonSchema = {
   ],
   properties: {
     position: { type: "integer", minimum: 0 },
-    description: nullableFieldSchema({ type: "string", minLength: 1 }),
-    quantityMilli: nullableFieldSchema({ type: "integer", minimum: 1 }),
-    unit: nullableFieldSchema({
-      type: "string",
-      enum: ["piece", "kg", "g", "l", "ml", "unknown"],
-    }),
-    unitPriceCents: nullableFieldSchema(signedCentsJsonSchema),
-    lineTotalCents: nullableFieldSchema(signedCentsJsonSchema),
-    categoryToken: nullableFieldSchema({ type: "string", enum: [] }),
+    description: fieldRef("nullableText"),
+    quantityMilli: fieldRef("nullableInteger"),
+    unit: fieldRef("nullableUnit"),
+    unitPriceCents: fieldRef("nullableInteger"),
+    lineTotalCents: fieldRef("nullableInteger"),
+    categoryToken: fieldRef("nullableCategoryToken"),
   },
 } as const;
 const taxBreakdownJsonSchema = {
@@ -329,14 +354,10 @@ const taxBreakdownJsonSchema = {
   additionalProperties: false,
   required: ["rateBasisPoints", "netCents", "taxCents", "grossCents"],
   properties: {
-    rateBasisPoints: nullableFieldSchema({
-      type: "integer",
-      minimum: 0,
-      maximum: 10_000,
-    }),
-    netCents: nullableFieldSchema(nonNegativeCentsJsonSchema),
-    taxCents: nullableFieldSchema(nonNegativeCentsJsonSchema),
-    grossCents: nullableFieldSchema(nonNegativeCentsJsonSchema),
+    rateBasisPoints: fieldRef("nullableInteger"),
+    netCents: fieldRef("nullableInteger"),
+    taxCents: fieldRef("nullableInteger"),
+    grossCents: fieldRef("nullableInteger"),
   },
 } as const;
 
@@ -360,25 +381,18 @@ const jsonSchema = {
   properties: {
     schemaVersion: { const: EXTRACTION_SCHEMA_VERSION },
     profileVersion: { const: GERMAN_RECEIPT_PROFILE_VERSION },
-    merchantText: nullableFieldSchema({ type: "string", minLength: 1 }),
-    // Patterns mirror receiptDateSchema/receiptTimeSchema so the provider
-    // constrains the reply instead of it failing validation on arrival.
-    purchaseDate: nullableFieldSchema({
-      type: "string",
-      pattern: "^\\d{4}-\\d{2}-\\d{2}$",
-    }),
-    purchaseTime: nullableFieldSchema({
-      type: "string",
-      pattern: "^([01]\\d|2[0-3]):[0-5]\\d$",
-    }),
-    currency: nullableFieldSchema({ type: "string", const: "EUR" }),
-    grossTotalCents: nullableFieldSchema({ type: "integer", minimum: 0 }),
-    netTotalCents: nullableFieldSchema({ type: "integer", minimum: 0 }),
-    taxTotalCents: nullableFieldSchema({ type: "integer", minimum: 0 }),
+    merchantText: fieldRef("nullableText"),
+    purchaseDate: fieldRef("nullableDate"),
+    purchaseTime: fieldRef("nullableTime"),
+    currency: fieldRef("nullableCurrency"),
+    grossTotalCents: fieldRef("nullableInteger"),
+    netTotalCents: fieldRef("nullableInteger"),
+    taxTotalCents: fieldRef("nullableInteger"),
     taxBreakdowns: { type: "array", items: taxBreakdownJsonSchema },
     lineItems: { type: "array", items: lineItemJsonSchema },
     warnings: { type: "array", items: { type: "string" } },
   },
+  $defs: fieldDefinitions,
 } as const;
 
 /**
@@ -416,18 +430,14 @@ const providerJsonSchema = stripUnsupportedJsonSchemaKeywords(jsonSchema);
 
 function providerSchemaFor(categoryTokens: string[]): unknown {
   const schema = structuredClone(providerJsonSchema) as {
-    properties: {
-      lineItems: {
-        items: {
-          properties: {
-            categoryToken: { properties: { value: { enum: unknown[] } } };
-          };
-        };
-      };
+    $defs: {
+      nullableCategoryToken: { properties: { value: { enum: unknown[] } } };
     };
   };
-  schema.properties.lineItems.items.properties.categoryToken.properties.value.enum =
-    [...categoryTokens, null];
+  schema.$defs.nullableCategoryToken.properties.value.enum = [
+    ...categoryTokens,
+    null,
+  ];
   return schema;
 }
 
