@@ -10,23 +10,31 @@ import {
  * undocumented, so the unit tests can only assert the structural property that
  * was observed to cross it. This is the check against the real limit.
  *
- * Opt in, because it spends tokens and needs network:
- *   RECEIPT_AI_LIVE_SCHEMA_CHECK=1 EXTRACTION_API_KEY=... pnpm vitest run \
- *     packages/receipt-ai/src/provider-schema.live.test.ts
+ * Opt in, because it spends tokens and needs network. The endpoint, model, and
+ * key are the same three variables the openai-compatible provider requires in
+ * `packages/config`; there is no default, because only the operator knows which
+ * provider they are checking against:
+ *   RECEIPT_AI_LIVE_SCHEMA_CHECK=1 \
+ *     EXTRACTION_BASE_URL=https://provider.example/v1/ \
+ *     EXTRACTION_MODEL=provider-model-name \
+ *     EXTRACTION_API_KEY=... \
+ *     pnpm vitest run packages/receipt-ai/src/provider-schema.live.test.ts
  *
  * One request, capped at 16 output tokens. The schema itself dominates the
  * input, so a run costs well under a cent. Grammar compilation is what makes
  * it slow (single-digit seconds) rather than what makes it expensive.
  */
-const apiKey = process.env.EXTRACTION_API_KEY ?? process.env.ANTHROPIC_API_KEY;
-const enabled = process.env.RECEIPT_AI_LIVE_SCHEMA_CHECK === "1" && !!apiKey;
+const apiKey = process.env.EXTRACTION_API_KEY ?? "";
+const baseUrl = process.env.EXTRACTION_BASE_URL ?? "";
+const model = process.env.EXTRACTION_MODEL ?? "";
+const enabled =
+  process.env.RECEIPT_AI_LIVE_SCHEMA_CHECK === "1" &&
+  !!apiKey &&
+  !!baseUrl &&
+  !!model;
 
 describe.skipIf(!enabled)("provider strict-schema acceptance (live)", () => {
   it("accepts the schema at the maximum category-option count", async () => {
-    const baseUrl =
-      process.env.EXTRACTION_BASE_URL ?? "https://api.anthropic.com/v1";
-    const model = process.env.EXTRACTION_MODEL ?? "claude-sonnet-4-6";
-
     // `categoryContext()` in the worker drops the options entirely past 500, so
     // 500 is the largest enum that ever reaches the provider.
     const categoryOptions = Array.from({ length: 500 }, (_, index) => ({
@@ -39,7 +47,7 @@ describe.skipIf(!enabled)("provider strict-schema acceptance (live)", () => {
     const extractor = createOpenAiCompatibleReceiptExtractor({
       baseUrl,
       model,
-      apiKey: apiKey ?? "",
+      apiKey,
       timeoutMs: 60_000,
       maxPages: 1,
       maxImageBytes: 1_000,
