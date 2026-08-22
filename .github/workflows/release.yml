@@ -30,6 +30,14 @@ jobs:
             echo "Release tag '$tag' is not vMAJOR.MINOR.PATCH[-prerelease]" >&2
             exit 1
           fi
+      - name: Require an annotated tag
+        run: |
+          git fetch --force origin \
+            "+refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+          if [[ "$(git cat-file -t "refs/tags/${GITHUB_REF_NAME}")" != "tag" ]]; then
+            echo "Release tag ${GITHUB_REF_NAME} must be annotated (git tag --annotate)" >&2
+            exit 1
+          fi
       - name: Require the tagged commit to be on main
         run: |
           git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
@@ -92,6 +100,7 @@ jobs:
         with:
           context: .
           target: api-runtime
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.api-meta.outputs.tags }}
           labels: ${{ steps.api-meta.outputs.labels }}
@@ -106,6 +115,7 @@ jobs:
         with:
           context: .
           target: worker-runtime
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.worker-meta.outputs.tags }}
           labels: ${{ steps.worker-meta.outputs.labels }}

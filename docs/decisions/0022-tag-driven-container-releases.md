@@ -14,7 +14,7 @@ to GitHub Container Registry as `ghcr.io/<owner>/receipt-report-api` and
 
 Both images carry the version tag, the `MAJOR.MINOR` tag, and the full commit
 SHA tag. No `latest` tag is published, and the workflow refuses tags that are
-not semantic versions or that point outside `main`. Signed build provenance is
+not annotated, not semantic versions, or that point outside `main`. Signed build provenance is
 attested for both digests, and the generated GitHub release records the two
 image digests as the recommended `.env.production` pins.
 

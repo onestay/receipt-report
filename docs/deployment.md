@@ -129,8 +129,8 @@ git tag --annotate v1.2.0 --message 'Receipt Report v1.2.0'
 git push origin refs/tags/v1.2.0
 ```
 
-The `Release` workflow rejects a tag that is not `vMAJOR.MINOR.PATCH` or that
-points outside `main`, re-runs the full `Verify` workflow for the tagged commit,
+The `Release` workflow rejects a tag that is lightweight, is not
+`vMAJOR.MINOR.PATCH`, or points outside `main`, re-runs the full `Verify` workflow for the tagged commit,
 builds the `api-runtime` and `worker-runtime` targets from that one source tree,
 and pushes them to `ghcr.io/onestay/receipt-report-api` and
 `ghcr.io/onestay/receipt-report-worker` with the version tag, the `MAJOR.MINOR`
