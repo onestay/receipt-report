@@ -108,13 +108,18 @@ stack: it uses explicitly selected API and worker images, stores the database
 and document tree in one named volume, loads provider credentials only into the
 worker, and publishes the unauthenticated application on localhost only.
 
+Every `vMAJOR.MINOR.PATCH` tag publishes both runtime images to GitHub Container
+Registry (`linux/amd64`); the GitHub release notes carry the digests to pin.
+
 ```bash
-git checkout <reviewed-release-tag-or-commit>
-docker build --target api-runtime -t receipt-report-api:<release> .
-docker build --target worker-runtime -t receipt-report-worker:<release> .
 cp .env.production.example .env.production
 chmod 600 .env.production
-# Replace every placeholder and keep both image tags on the same release.
+# Pin both images to the same release, preferably by digest:
+#   RECEIPT_REPORT_API_IMAGE=ghcr.io/onestay/receipt-report-api@sha256:<digest>
+#   RECEIPT_REPORT_WORKER_IMAGE=ghcr.io/onestay/receipt-report-worker@sha256:<digest>
+# Replace every remaining placeholder.
+
+docker compose --env-file .env.production -f compose.production.yaml pull
 
 docker compose --env-file .env.production -f compose.production.yaml config --quiet
 docker compose --env-file .env.production -f compose.production.yaml up --detach --wait
@@ -127,6 +132,17 @@ single-user software without authentication. Before upgrades or model/profile
 changes, follow the backup and rollback procedure in
 [`docs/deployment.md`](docs/deployment.md). That guide also covers restore,
 provider privacy, key rotation, retention, growth, and failure diagnosis.
+
+### Releases
+
+Pushing an annotated `vMAJOR.MINOR.PATCH` tag on a commit that is already on
+`main` runs the `Release` workflow: it re-runs the full verification suite for
+that commit, builds the API and worker images from that one source tree, pushes
+them to GHCR with the version, `MAJOR.MINOR`, and commit-SHA tags, attests build
+provenance, and creates the GitHub release. `latest` is never published, and API
+and worker images always come from the same commit. Hosts on other architectures
+still build the tagged release themselves. See
+[`docs/deployment.md`](docs/deployment.md#cutting-a-release).
 
 ## Configuration
 

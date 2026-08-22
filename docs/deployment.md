@@ -16,8 +16,16 @@ owner (`chmod 600`), and replace every placeholder. Never commit that file.
 The authoritative variable reference, including defaults and service ownership,
 is in the [README configuration section](../README.md#configuration).
 
-This repository does not publish registry images yet. A clean host can build a
-selected signed/reviewed git release locally, then use those exact local tags:
+Each release tag publishes both images to GitHub Container Registry. Take the
+digests from the GitHub release notes for the version you selected and pin them:
+
+```bash
+docker pull ghcr.io/onestay/receipt-report-api@sha256:<api-digest>
+docker pull ghcr.io/onestay/receipt-report-worker@sha256:<worker-digest>
+```
+
+The published images are `linux/amd64`. A host on another architecture, or an
+air-gapped host, builds the same release locally instead and uses those tags:
 
 ```bash
 git checkout <release-tag-or-commit>
@@ -25,7 +33,8 @@ docker build --target api-runtime -t receipt-report-api:<release> .
 docker build --target worker-runtime -t receipt-report-worker:<release> .
 ```
 
-Do not use `latest`, and do not build API and worker from different commits.
+Do not use `latest`; it is deliberately never published. Do not mix API and
+worker from different releases.
 
 Validate before startup:
 
@@ -36,9 +45,9 @@ curl --fail http://127.0.0.1:3000/api/v1/health
 curl --fail http://127.0.0.1:3000/api/v1/operator/status | jq
 ```
 
-The commands above use the locally built tags. Run `docker compose ... pull`
-before `up` only when the selected immutable images actually exist in a
-registry.
+Run `docker compose --env-file .env.production -f compose.production.yaml pull`
+before `up` when the pins refer to registry images; skip it for locally built
+tags.
 
 The migration container must finish before API and worker start. A failed
 `migrate` service identifies schema/database/volume ownership errors; an
@@ -83,10 +92,10 @@ set -a; . ./.env.production; set +a
 # copy both .tar.gz and .sha256 off-host and protect them like the receipts
 ```
 
-For every upgrade: read release migration/compatibility notes; create and verify
-the backup; build both image targets from the same reviewed release (or pull
-both immutable images when they exist in a registry); change both image pins;
-then run `up --detach --wait`. Confirm health, operator status, a known approved
+For every upgrade: read the release migration/compatibility notes; create and
+verify the backup; pull both immutable images from the same release (or build
+both targets from that release); change both image pins; then run
+`up --detach --wait`. Confirm health, operator status, a known approved
 receipt, and its spending report. Never run a newer worker against an older
 API/schema.
 
@@ -108,6 +117,32 @@ Run the isolated production-stack recovery check with
 fake-provider workflow, invokes the real backup and restore commands, and
 verifies that documents, approvals, corrections, and reporting state survive
 while post-backup state is removed.
+
+## Cutting a release
+
+Releases are marked by tag, not by branch state. Tag a commit that is already
+merged into `main`, then push the tag:
+
+```bash
+git checkout main && git pull --ff-only
+git tag --annotate v1.2.0 --message 'Receipt Report v1.2.0'
+git push origin refs/tags/v1.2.0
+```
+
+The `Release` workflow rejects a tag that is lightweight, is not
+`vMAJOR.MINOR.PATCH`, or points outside `main`, re-runs the full `Verify` workflow for the tagged commit,
+builds the `api-runtime` and `worker-runtime` targets from that one source tree,
+and pushes them to `ghcr.io/onestay/receipt-report-api` and
+`ghcr.io/onestay/receipt-report-worker` with the version tag, the `MAJOR.MINOR`
+tag, and the commit SHA tag. It attests signed build provenance for both digests
+and creates the GitHub release, whose notes carry the two digests to pin.
+
+A prerelease tag such as `v1.2.0-rc.1` publishes images and a GitHub prerelease
+but no `MAJOR.MINOR` tag. Tags are never moved or re-pushed: correcting a
+release means publishing the next version. Add the migration, compatibility, and
+rollback notes required by [ADR 0016](decisions/0016-durable-real-data-deployment.md)
+to the generated release before deploying it. See
+[ADR 0022](decisions/0022-tag-driven-container-releases.md) for the reasoning.
 
 ## Provider privacy and lifecycle
 

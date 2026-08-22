@@ -69,6 +69,10 @@ defined by ADR 0016. From this point onward, migrations preserve user data,
 release notes document compatibility and rollback boundaries, and destructive
 schema changes require an explicit tested backup/restore plan.
 
+Releases are cut by pushing a `vMAJOR.MINOR.PATCH` tag on a verified `main`
+commit, which publishes the pinnable API and worker container images described
+by ADR 0022.
+
 ## Definition of done for a milestone
 
 - Acceptance criteria for its issues are met
