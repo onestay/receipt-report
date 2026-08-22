@@ -1,5 +1,11 @@
 import { z } from "zod";
 
+export const UPLOAD_PLACEHOLDER_RECEIPT = {
+  merchantRaw: "Pending AI extraction",
+  currency: "EUR",
+  totalCents: 0,
+} as const;
+
 export const healthResponseSchema = z.object({
   status: z.literal("ok"),
   service: z.literal("receipt-report-api"),
@@ -23,6 +29,14 @@ export const operatorStatusResponseSchema = z.object({
   staleAfterSeconds: z.number().int().positive(),
   normalization: operatorJobCountsSchema,
   extraction: operatorJobCountsSchema,
+  emailImport: z.object({
+    enabled: z.boolean(),
+    lastSuccessfulPollAt: z.string().datetime().nullable(),
+    pending: z.number().int().nonnegative(),
+    imported: z.number().int().nonnegative(),
+    duplicate: z.number().int().nonnegative(),
+    failed: z.number().int().nonnegative(),
+  }),
 });
 
 export type OperatorStatusResponse = z.infer<

@@ -12,16 +12,24 @@ export class OperatorStatusRepository {
 
   async get(now = new Date()) {
     const staleBefore = new Date(now.getTime() - this.staleAfterMs);
-    const [normalization, extraction] = await Promise.all([
-      this.database.normalizationJob.groupBy({
-        by: ["status"],
-        _count: { _all: true },
-      }),
-      this.database.extractionJob.groupBy({
-        by: ["status"],
-        _count: { _all: true },
-      }),
-    ]);
+    const [normalization, extraction, emailImport, emailHealth] =
+      await Promise.all([
+        this.database.normalizationJob.groupBy({
+          by: ["status"],
+          _count: { _all: true },
+        }),
+        this.database.extractionJob.groupBy({
+          by: ["status"],
+          _count: { _all: true },
+        }),
+        this.database.emailAttachmentImport.groupBy({
+          by: ["status"],
+          _count: { _all: true },
+        }),
+        this.database.emailImporterHealth.findUnique({
+          where: { id: "default" },
+        }),
+      ]);
     const [staleNormalization, staleExtraction] = await Promise.all([
       this.database.normalizationJob.count({
         where: {
@@ -67,6 +75,24 @@ export class OperatorStatusRepository {
       staleAfterSeconds: Math.floor(this.staleAfterMs / 1000),
       normalization: normalizationCounts,
       extraction: extractionCounts,
+      emailImport: {
+        enabled: emailHealth?.enabled ?? false,
+        lastSuccessfulPollAt:
+          emailHealth?.lastSuccessfulPollAt?.toISOString() ?? null,
+        pending: emailImport
+          .filter((row) =>
+            ["pending", "running", "retry_wait"].includes(row.status),
+          )
+          .reduce((sum, row) => sum + row._count._all, 0),
+        imported:
+          emailImport.find((row) => row.status === "imported")?._count._all ??
+          0,
+        duplicate:
+          emailImport.find((row) => row.status === "duplicate")?._count._all ??
+          0,
+        failed:
+          emailImport.find((row) => row.status === "failed")?._count._all ?? 0,
+      },
     });
   }
 }

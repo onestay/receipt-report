@@ -19,6 +19,7 @@ import {
 import { ExtractionProcessor } from "./extraction.js";
 import { NormalizationProcessor } from "./normalization.js";
 import { LocalDocumentRenderer, type DocumentRenderer } from "./renderer.js";
+import { EmailImporter } from "./email-import.js";
 import {
   createLogger,
   safeUnexpectedError,
@@ -85,6 +86,12 @@ export async function startWorker(
     undefined,
     logger,
   );
+  const emailImporter = new EmailImporter(database, storage, config, logger);
+  await database.emailImporterHealth.upsert({
+    where: { id: "default" },
+    create: { id: "default", enabled: config.EMAIL_IMPORT_ENABLED },
+    update: { enabled: config.EMAIL_IMPORT_ENABLED },
+  });
   await processor.resetInterruptedJobs();
   await extractionProcessor.resetExpiredClaims();
   await extractionProcessor.purgeExpiredRawPayloads();
@@ -101,13 +108,20 @@ export async function startWorker(
     try {
       const normalized = await processor.processNext();
       const extracted = await extractionProcessor.processNext();
-      const processed = normalized || extracted;
+      const imported = emailImporter.due() ? await emailImporter.poll() : false;
+      const processed = normalized || extracted || imported;
       if (!stopped)
         timer = setTimeout(
           schedulePoll,
           processed
             ? 0
-            : Math.min(config.NORMALIZATION_POLL_MS, config.EXTRACTION_POLL_MS),
+            : Math.min(
+                config.NORMALIZATION_POLL_MS,
+                config.EXTRACTION_POLL_MS,
+                config.EMAIL_IMPORT_ENABLED
+                  ? config.EMAIL_IMPORT_POLL_MS
+                  : Number.MAX_SAFE_INTEGER,
+              ),
         );
     } catch (error) {
       logger.error(
@@ -142,6 +156,7 @@ export async function startWorker(
     database,
     processor,
     extractionProcessor,
+    emailImporter,
     readyFile: config.WORKER_READY_FILE,
     stop,
   };

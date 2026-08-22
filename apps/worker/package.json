@@ -10,11 +10,14 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@receipt-report/api": "workspace:*",
     "@receipt-report/config": "workspace:*",
     "@receipt-report/contracts": "workspace:*",
     "@receipt-report/database": "workspace:*",
     "@receipt-report/logging": "workspace:*",
     "@receipt-report/receipt-ai": "workspace:*",
+    "file-type": "21.3.0",
+    "imapflow": "1.0.195",
     "sharp": "0.34.5"
   }
 }

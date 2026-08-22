@@ -352,6 +352,51 @@ describe("receipt document API", () => {
     ).resolves.toBeTruthy();
   });
 
+  it("removes an email-imported document and its receipt without stranding provenance", async () => {
+    const receiptId = await receipt();
+    const uploaded = await request(app())
+      .post(`/api/v1/receipts/${receiptId}/document`)
+      .attach("document", png, "inbox.png")
+      .expect(201);
+    const cursor = await database.emailImportCursor.create({
+      data: {
+        accountKey: "a".repeat(64),
+        mailboxKey: "b".repeat(64),
+        uidValidity: "7",
+      },
+    });
+    const message = await database.emailMessageImport.create({
+      data: { cursorId: cursor.id, uid: 1 },
+    });
+    await database.emailAttachmentImport.create({
+      data: {
+        messageId: message.id,
+        partId: "1",
+        ordinal: 0,
+        status: "imported",
+        receiptId,
+        documentId: uploaded.body.id,
+      },
+    });
+
+    await request(app())
+      .delete(`/api/v1/receipts/${receiptId}/document`)
+      .expect(204);
+    await request(app()).delete(`/api/v1/receipts/${receiptId}`).expect(204);
+
+    // The import row outlives both, so a re-poll still recognizes the
+    // attachment as handled, but it must not pin deleted rows in place.
+    await expect(
+      database.emailAttachmentImport.findFirstOrThrow({
+        select: { status: true, receiptId: true, documentId: true },
+      }),
+    ).resolves.toEqual({
+      status: "imported",
+      receiptId: null,
+      documentId: null,
+    });
+  });
+
   it("supersedes pending proposals and protects retained extraction history", async () => {
     const receiptId = await receipt();
     const uploaded = await request(app())

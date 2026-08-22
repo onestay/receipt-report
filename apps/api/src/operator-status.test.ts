@@ -17,6 +17,34 @@ afterEach(async () => {
 });
 
 describe("operator status API", () => {
+  it("reports disabled email import with zero aggregate counts by default", async () => {
+    directory = await mkdtemp(join(tmpdir(), "receipt-operator-empty-"));
+    const databaseUrl = `file:${join(directory, "status.db")}`;
+    execFileSync(
+      "pnpm",
+      ["--filter", "@receipt-report/database", "db:migrate:deploy"],
+      {
+        cwd: process.cwd(),
+        env: { ...process.env, DATABASE_URL: databaseUrl },
+        stdio: "pipe",
+      },
+    );
+    database = await createDatabase(databaseUrl);
+    const response = await request(
+      createApp({ database, operatorStaleAfterMs: 1000 }),
+    )
+      .get("/api/v1/operator/status")
+      .expect(200);
+    expect(response.body.emailImport).toEqual({
+      enabled: false,
+      lastSuccessfulPollAt: null,
+      pending: 0,
+      imported: 0,
+      duplicate: 0,
+      failed: 0,
+    });
+  });
+
   it("aggregates lifecycle states and marks stale work without leaking payloads", async () => {
     directory = await mkdtemp(join(tmpdir(), "receipt-operator-"));
     const databaseUrl = `file:${join(directory, "status.db")}`;
@@ -69,6 +97,69 @@ describe("operator status API", () => {
         lastErrorKind: "provider_authentication",
       },
     });
+    const cursor = await database.emailImportCursor.create({
+      data: {
+        accountKey: "opaque-account",
+        mailboxKey: "opaque-mailbox",
+        uidValidity: "1",
+      },
+    });
+    const message = await database.emailMessageImport.create({
+      data: { cursorId: cursor.id, uid: 1, status: "complete" },
+    });
+    await database.emailAttachmentImport.createMany({
+      data: [
+        {
+          messageId: message.id,
+          partId: "1",
+          ordinal: 0,
+          originalFilename: "PRIVATE-FILENAME.pdf",
+          status: "imported",
+          receiptId: receipt.id,
+          documentId: document.id,
+        },
+        {
+          messageId: message.id,
+          partId: "2",
+          ordinal: 1,
+          status: "retry_wait",
+          failureCode: "PRIVATE-FAILURE",
+        },
+        {
+          messageId: message.id,
+          partId: "3",
+          ordinal: 2,
+          status: "pending",
+        },
+        {
+          messageId: message.id,
+          partId: "4",
+          ordinal: 3,
+          status: "running",
+        },
+        {
+          messageId: message.id,
+          partId: "5",
+          ordinal: 4,
+          status: "duplicate",
+          receiptId: receipt.id,
+          documentId: document.id,
+        },
+        {
+          messageId: message.id,
+          partId: "6",
+          ordinal: 5,
+          status: "failed",
+        },
+      ],
+    });
+    await database.emailImporterHealth.create({
+      data: {
+        id: "default",
+        enabled: true,
+        lastSuccessfulPollAt: new Date("2026-08-12T06:00:00.000Z"),
+      },
+    });
     const response = await request(
       createApp({ database, operatorStaleAfterMs: 1000 }),
     )
@@ -81,10 +172,20 @@ describe("operator status API", () => {
       status: "attention_required",
       normalization: { running: 1, stale: 1 },
       extraction: { retrying: 1 },
+      emailImport: {
+        enabled: true,
+        lastSuccessfulPollAt: "2026-08-12T06:00:00.000Z",
+        pending: 3,
+        imported: 1,
+        duplicate: 1,
+        failed: 1,
+      },
     });
     expect(JSON.stringify(response.body)).not.toContain("PRIVATE MARKER");
     expect(JSON.stringify(response.body)).not.toContain(
       "provider_authentication",
     );
+    expect(JSON.stringify(response.body)).not.toContain("PRIVATE-FILENAME");
+    expect(JSON.stringify(response.body)).not.toContain("PRIVATE-FAILURE");
   });
 });

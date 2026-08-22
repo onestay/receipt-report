@@ -138,6 +138,23 @@ const workerSchema = sharedSchema
       .enum(["true", "false"])
       .default("true")
       .transform((value) => value === "true"),
+    EMAIL_IMPORT_ENABLED: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((value) => value === "true"),
+    EMAIL_IMPORT_HOST: z.string().min(1).optional(),
+    EMAIL_IMPORT_PORT: z.coerce.number().int().min(1).max(65_535).default(993),
+    EMAIL_IMPORT_USERNAME: z.string().min(1).optional(),
+    EMAIL_IMPORT_PASSWORD: z.string().min(1).optional(),
+    EMAIL_IMPORT_FOLDER: z.string().min(1).default("INBOX"),
+    EMAIL_IMPORT_POLL_MS: positiveLimit.default(60_000),
+    EMAIL_IMPORT_COMMAND_TIMEOUT_MS: positiveLimit.default(30_000),
+    EMAIL_IMPORT_MAX_MESSAGES: positiveLimit.max(1000).default(50),
+    EMAIL_IMPORT_MAX_ATTACHMENTS: positiveLimit.max(1000).default(50),
+    EMAIL_IMPORT_LEASE_MS: positiveLimit.default(120_000),
+    EMAIL_IMPORT_MAX_ATTEMPTS: positiveLimit.max(20).default(5),
+    EMAIL_IMPORT_RETRY_BASE_MS: positiveLimit.default(5_000),
+    EMAIL_IMPORT_RETRY_MAX_MS: positiveLimit.default(300_000),
   })
   .superRefine((value, context) => {
     if (value.EXTRACTION_RETRY_MAX_MS < value.EXTRACTION_RETRY_BASE_MS) {
@@ -148,6 +165,34 @@ const workerSchema = sharedSchema
           "EXTRACTION_RETRY_MAX_MS must be at least EXTRACTION_RETRY_BASE_MS",
       });
     }
+    if (value.EMAIL_IMPORT_ENABLED) {
+      for (const key of [
+        "EMAIL_IMPORT_HOST",
+        "EMAIL_IMPORT_USERNAME",
+        "EMAIL_IMPORT_PASSWORD",
+      ] as const) {
+        if (!value[key])
+          context.addIssue({
+            code: "custom",
+            path: [key],
+            message: `${key} is required when email import is enabled`,
+          });
+      }
+      if (value.EMAIL_IMPORT_LEASE_MS <= value.EMAIL_IMPORT_COMMAND_TIMEOUT_MS)
+        context.addIssue({
+          code: "custom",
+          path: ["EMAIL_IMPORT_LEASE_MS"],
+          message:
+            "EMAIL_IMPORT_LEASE_MS must exceed EMAIL_IMPORT_COMMAND_TIMEOUT_MS",
+        });
+    }
+    if (value.EMAIL_IMPORT_RETRY_MAX_MS < value.EMAIL_IMPORT_RETRY_BASE_MS)
+      context.addIssue({
+        code: "custom",
+        path: ["EMAIL_IMPORT_RETRY_MAX_MS"],
+        message:
+          "EMAIL_IMPORT_RETRY_MAX_MS must be at least EMAIL_IMPORT_RETRY_BASE_MS",
+      });
   });
 
 export type ApiConfig = z.infer<typeof apiSchema>;

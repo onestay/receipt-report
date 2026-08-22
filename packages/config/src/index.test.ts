@@ -51,6 +51,30 @@ describe("configuration", () => {
       EXTRACTION_RETRY_AFTER_MAX_MS: 300_000,
       EXTRACTION_RETRY_JITTER_PERCENT: 20,
       EXTRACTION_RAW_RETENTION_MS: 7 * 24 * 60 * 60 * 1000,
+      EMAIL_IMPORT_ENABLED: false,
+      EMAIL_IMPORT_PORT: 993,
+      EMAIL_IMPORT_FOLDER: "INBOX",
+    });
+  });
+
+  it("requires complete secure email-import credentials when enabled", () => {
+    const base = {
+      ...shared,
+      WORKER_READY_FILE: "ready",
+      EMAIL_IMPORT_ENABLED: "true",
+    };
+    expect(() => parseWorkerConfig(base)).toThrow();
+    expect(
+      parseWorkerConfig({
+        ...base,
+        EMAIL_IMPORT_HOST: "imap.example.test",
+        EMAIL_IMPORT_USERNAME: "receipts",
+        EMAIL_IMPORT_PASSWORD: "app-password",
+      }),
+    ).toMatchObject({
+      EMAIL_IMPORT_ENABLED: true,
+      EMAIL_IMPORT_PORT: 993,
+      EMAIL_IMPORT_FOLDER: "INBOX",
     });
   });
 

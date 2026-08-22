@@ -102,9 +102,10 @@ export class FilesystemDocumentStorage {
     source: AsyncIterable<Uint8Array>,
     maxBytes: number,
     onCleanupFailure?: (relativePath: string) => Promise<void>,
+    namespace = "api",
   ): Promise<{ relativePath: string; byteSize: number; sha256: string }> {
     await this.initialize();
-    const relativePath = `staging/api/${randomUUID()}.tmp`;
+    const relativePath = `staging/${safeSegment(namespace)}/${randomUUID()}.tmp`;
     const handle = await open(this.path(relativePath), "wx", 0o600);
     const hash = createHash("sha256");
     let byteSize = 0;
@@ -228,7 +229,7 @@ export class DocumentStorageLimitError extends Error {}
 export class EmptyDocumentError extends Error {}
 
 export type PersistOriginalInput = {
-  receiptId: string;
+  receiptId?: string;
   stagedRelativePath: string;
   originalFilename: string | null;
   mediaType: "image/jpeg" | "image/png" | "application/pdf";
@@ -243,6 +244,8 @@ export async function persistOriginalDocument(
   hooks: {
     afterPromote?: (() => Promise<void>) | undefined;
     onCleanupFailure?: ((relativePath: string) => Promise<void>) | undefined;
+    beforeDocument?:
+      ((transaction: Prisma.TransactionClient) => Promise<string>) | undefined;
     insideTransaction?:
       | ((
           transaction: Prisma.TransactionClient,
@@ -265,9 +268,13 @@ export async function persistOriginalDocument(
     await storage.promote(input.stagedRelativePath, promotedPath);
     await hooks.afterPromote?.();
     return await database.$transaction(async (transaction) => {
+      const receiptId =
+        input.receiptId ?? (await hooks.beforeDocument?.(transaction));
+      if (!receiptId)
+        throw new Error("Receipt id is required before document persistence");
       const document = await transaction.receiptDocument.create({
         data: {
-          receiptId: input.receiptId,
+          receiptId,
           relativePath: promotedPath,
           originalFilename: input.originalFilename,
           mediaType: input.mediaType,
