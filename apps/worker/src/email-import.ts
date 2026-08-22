@@ -11,6 +11,11 @@ import {
   NORMALIZATION_PROFILE_VERSION,
   UPLOAD_PLACEHOLDER_RECEIPT,
 } from "@receipt-report/contracts";
+// Mailbox attachments are as untrusted as uploads, so they must clear exactly
+// the same byte-level validation rather than a second implementation of it.
+// That module owns the upload boundary and depends only on `file-type` and a
+// storage type, so the worker consumes it directly instead of forking it; the
+// worker image therefore builds `@receipt-report/api` as well.
 import {
   sanitizeOriginalFilename,
   validateStagedDocument,

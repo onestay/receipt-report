@@ -51,8 +51,8 @@ CREATE TABLE "EmailAttachmentImport" (
   "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updatedAt" DATETIME NOT NULL,
   CONSTRAINT "EmailAttachmentImport_messageId_fkey" FOREIGN KEY ("messageId") REFERENCES "EmailMessageImport"("id") ON DELETE RESTRICT ON UPDATE CASCADE,
-  CONSTRAINT "EmailAttachmentImport_receiptId_fkey" FOREIGN KEY ("receiptId") REFERENCES "Receipt"("id") ON DELETE RESTRICT ON UPDATE CASCADE,
-  CONSTRAINT "EmailAttachmentImport_documentId_fkey" FOREIGN KEY ("documentId") REFERENCES "ReceiptDocument"("id") ON DELETE RESTRICT ON UPDATE CASCADE
+  CONSTRAINT "EmailAttachmentImport_receiptId_fkey" FOREIGN KEY ("receiptId") REFERENCES "Receipt"("id") ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT "EmailAttachmentImport_documentId_fkey" FOREIGN KEY ("documentId") REFERENCES "ReceiptDocument"("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 CREATE UNIQUE INDEX "EmailAttachmentImport_claimToken_key" ON "EmailAttachmentImport"("claimToken");
 CREATE UNIQUE INDEX "EmailAttachmentImport_messageId_partId_key" ON "EmailAttachmentImport"("messageId", "partId");

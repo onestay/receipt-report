@@ -153,10 +153,13 @@ model EmailAttachmentImport {
   failureCode      String?
   sha256           String?
   byteSize         Int?
+  /// Provenance only. Cleared when the receipt or document is deleted, so an
+  /// email-imported document stays deletable while the row still records that
+  /// this attachment was already handled.
   receiptId        String?
-  receipt           Receipt? @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+  receipt           Receipt? @relation(fields: [receiptId], references: [id], onDelete: SetNull)
   documentId       String?
-  document          ReceiptDocument? @relation(fields: [documentId], references: [id], onDelete: Restrict)
+  document          ReceiptDocument? @relation(fields: [documentId], references: [id], onDelete: SetNull)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
