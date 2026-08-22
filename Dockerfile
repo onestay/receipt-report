@@ -23,6 +23,7 @@ RUN pnpm --filter @receipt-report/config build \
     && pnpm --filter @receipt-report/contracts build \
     && pnpm --filter @receipt-report/database build \
     && pnpm --filter @receipt-report/receipt-ai build \
+    && pnpm --filter @receipt-report/api build \
     && pnpm --filter @receipt-report/worker build
 
 FROM node:24.18.0-bookworm-slim AS runtime-base

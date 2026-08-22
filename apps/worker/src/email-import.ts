@@ -39,6 +39,30 @@ function comparePartIds(left: string, right: string): number {
   return left.localeCompare(right);
 }
 
+/**
+ * An explicit attachment that carries the part id and declared size the rest of
+ * the import needs. Narrowing here keeps those two fields non-optional
+ * downstream instead of repeating fallbacks that the filter already excludes.
+ */
+type BoundedAttachment = MessageStructureObject & {
+  part: string;
+  size: number;
+};
+
+function isBoundedAttachment(
+  node: MessageStructureObject,
+  maxBytes: number,
+): node is BoundedAttachment {
+  const size = node.size ?? 0;
+  return (
+    node.disposition?.toLowerCase() === "attachment" &&
+    !!node.part &&
+    node.type.toLowerCase() !== "message/rfc822" &&
+    size > 0 &&
+    size <= maxBytes
+  );
+}
+
 export function selectAttachmentParts(
   structure: MessageStructureObject,
   maxBytes: number,
@@ -50,22 +74,17 @@ export function selectAttachmentParts(
   };
   visit(structure);
   return nodes
-    .filter(
-      (node) =>
-        node.disposition?.toLowerCase() === "attachment" &&
-        !!node.part &&
-        node.type.toLowerCase() !== "message/rfc822" &&
-        (node.size ?? 0) > 0 &&
-        (node.size ?? 0) <= maxBytes,
+    .filter((node): node is BoundedAttachment =>
+      isBoundedAttachment(node, maxBytes),
     )
-    .sort((left, right) => comparePartIds(left.part ?? "", right.part ?? ""))
+    .sort((left, right) => comparePartIds(left.part, right.part))
     .map((node, ordinal) => ({
-      partId: node.part ?? "",
+      partId: node.part,
       ordinal,
       filename: sanitizeOriginalFilename(
         node.dispositionParameters?.filename ?? node.parameters?.name,
       ),
-      declaredSize: node.size ?? 0,
+      declaredSize: node.size,
     }));
 }
 
