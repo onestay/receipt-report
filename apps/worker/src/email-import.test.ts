@@ -85,7 +85,8 @@ afterEach(async () => {
 
 function pdf(label: string): Buffer {
   return Buffer.from(
-    `%PDF-1.4\n1 0 obj<</Type /Page /Label (${label})>>endobj\nxref\nstartxref\n0\n%%EOF\n`,
+    `%PDF-1.4\n1 0 obj<</Type /Page /Label (${label})>>endobj\n` +
+      `xref\n0 1\ntrailer<</Root 1 0 R>>\nstartxref\n0\n%%EOF\n`,
   );
 }
 

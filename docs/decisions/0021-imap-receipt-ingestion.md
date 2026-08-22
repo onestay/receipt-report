@@ -1,4 +1,4 @@
-# ADR 0020: Dedicated IMAP receipt ingestion
+# ADR 0021: Dedicated IMAP receipt ingestion
 
 ## Status
 
