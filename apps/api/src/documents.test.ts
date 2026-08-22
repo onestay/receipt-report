@@ -28,6 +28,11 @@ const pdf = Buffer.from(
     "xref\n0 4\n0000000000 65535 f \ntrailer<</Root 1 0 R>>\n" +
     "startxref\n0\n%%EOF\n",
 );
+const compressedPdf = Buffer.from(
+  "%PDF-1.6\n5 0 obj<</Type /ObjStm /N 3 /First 9>>stream\nsynthetic\nendstream endobj\n" +
+    "6 0 obj<</Type /XRef /Size 7 /Root 1 0 R /Encrypt 4 0 R>>stream\nsynthetic\nendstream endobj\n" +
+    "startxref\n0\n%%EOF\n",
+);
 
 let directory = "";
 let database: Database;
@@ -98,6 +103,7 @@ describe("receipt document API", () => {
     ["image.png", "application/octet-stream", png, "image/png"],
     ["image.jpg", "text/plain", jpeg, "image/jpeg"],
     ["document.pdf", "image/png", pdf, "application/pdf"],
+    ["ebon.pdf", "application/pdf", compressedPdf, "application/pdf"],
   ])(
     "uploads and serves a structurally valid %s",
     async (filename, clientType, bytes, mediaType) => {

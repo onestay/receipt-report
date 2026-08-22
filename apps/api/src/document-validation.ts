@@ -201,15 +201,21 @@ async function validateJpeg(
     throw new MalformedDocumentError();
 }
 
+// Page objects and the document catalog may live inside compressed object
+// streams, and standard-security encryption hides string and stream payloads
+// from this scan. Neither is corruption, so the visible trailer skeleton is the
+// only structure required here; the worker's Poppler pass is authoritative for
+// page count and for whether the file opens without a password.
 async function validatePdf(
   storage: FilesystemDocumentStorage,
   path: string,
   limits: DocumentValidationLimits,
   deadline: number,
 ): Promise<void> {
-  let pageCount = 0;
-  let sawXref = false;
+  let visiblePages = 0;
+  let sawCrossReference = false;
   let sawStartXref = false;
+  let sawCatalog = false;
   let sawEof = false;
   let tail = "";
   for await (const chunk of storage.createReadStream(path, {
@@ -217,17 +223,18 @@ async function validatePdf(
   })) {
     deadlineGuard(deadline);
     const text = tail + Buffer.from(chunk).toString("latin1");
-    if (/\/Encrypt\b/.test(text)) throw new MalformedDocumentError();
     for (const match of text.matchAll(/\/Type\s*\/Page\b/g)) {
-      if ((match.index ?? 0) + match[0].length > tail.length) pageCount += 1;
+      if ((match.index ?? 0) + match[0].length > tail.length) visiblePages += 1;
     }
-    if (pageCount > limits.maxPdfPages) throw new MalformedDocumentError();
-    sawXref ||= /\bxref\b/.test(text);
+    if (visiblePages > limits.maxPdfPages) throw new MalformedDocumentError();
+    sawCrossReference ||=
+      /\bxref\b/.test(text) || /\/Type\s*\/XRef\b/.test(text);
     sawStartXref ||= /\bstartxref\b/.test(text);
+    sawCatalog ||= /\/Root\s+\d+\s+\d+\s+R\b/.test(text);
     sawEof ||= /%%EOF/.test(text);
     tail = text.slice(-128);
   }
-  if (pageCount < 1 || !sawXref || !sawStartXref || !sawEof)
+  if (!sawCatalog || !sawCrossReference || !sawStartXref || !sawEof)
     throw new MalformedDocumentError();
 }
 

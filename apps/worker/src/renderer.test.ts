@@ -144,12 +144,48 @@ describe("local renderer", () => {
     ).rejects.toMatchObject({ code: "pdf_page_invalid" });
   });
 
-  it("rejects encrypted PDFs before rendering a page", async () => {
+  it("renders encrypted PDFs that Poppler opens without a password", async () => {
+    const renderedPng = await sharp({
+      create: { width: 10, height: 5, channels: 3, background: "white" },
+    })
+      .png()
+      .toBuffer();
     const path = await storage.stage(Buffer.from("encrypted pdf"));
-    const run = vi.fn(async () => ({
-      stdout: Buffer.from("Encrypted: yes\nPages: 1\n"),
-      stderr: Buffer.alloc(0),
-    }));
+    const run = vi.fn(async (command: string, args: string[]) => {
+      if (command === "pdfinfo")
+        return {
+          stdout: Buffer.from(
+            "Pages:           1\n" +
+              "Encrypted:       yes (print:yes copy:no change:no addNotes:no algorithm:RC4)\n",
+          ),
+          stderr: Buffer.alloc(0),
+        };
+      if (args.includes("-v"))
+        return {
+          stdout: Buffer.alloc(0),
+          stderr: Buffer.from("pdftoppm version 25.01.0\n"),
+        };
+      return { stdout: renderedPng, stderr: Buffer.alloc(0) };
+    });
+    const result = await new LocalDocumentRenderer(storage, config, run).render(
+      {
+        relativePath: path,
+        mediaType: "application/pdf",
+      },
+    );
+    expect(result.pages.map((page) => [page.width, page.height])).toEqual([
+      [10, 5],
+    ]);
+  });
+
+  it("reports PDFs that Poppler cannot open without a password", async () => {
+    const path = await storage.stage(Buffer.from("password protected pdf"));
+    const run = vi.fn(async () => {
+      throw new RendererFailure(
+        "renderer_failed",
+        "Command Line Error: Incorrect password\n",
+      );
+    });
     await expect(
       new LocalDocumentRenderer(storage, config, run).render({
         relativePath: path,
@@ -157,6 +193,22 @@ describe("local renderer", () => {
       }),
     ).rejects.toMatchObject({ code: "encrypted_pdf" });
     expect(run).toHaveBeenCalledOnce();
+  });
+
+  it("keeps unrelated inspection failures generic", async () => {
+    const path = await storage.stage(Buffer.from("broken pdf"));
+    const run = vi.fn(async () => {
+      throw new RendererFailure(
+        "renderer_failed",
+        "Syntax Error: Document stream is empty\n",
+      );
+    });
+    await expect(
+      new LocalDocumentRenderer(storage, config, run).render({
+        relativePath: path,
+        mediaType: "application/pdf",
+      }),
+    ).rejects.toMatchObject({ code: "renderer_failed" });
   });
 
   it("enforces one wall-clock budget across a PDF job", async () => {
@@ -261,5 +313,16 @@ describe("local renderer", () => {
       }),
       "Document renderer command failed",
     );
+
+    await expect(
+      runLimitedCommand(
+        "sh",
+        ["-c", "echo 'Command Line Error: Incorrect password' >&2; exit 1"],
+        { timeoutMs: 1000, maxBuffer: 1024, memoryMb: 64 },
+      ),
+    ).rejects.toMatchObject({
+      code: "renderer_failed",
+      stderr: expect.stringContaining("Incorrect password"),
+    });
   });
 });

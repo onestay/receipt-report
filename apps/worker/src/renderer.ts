@@ -32,7 +32,10 @@ type CommandRunner = (
 ) => Promise<CommandResult>;
 
 export class RendererFailure extends Error {
-  constructor(readonly code: string) {
+  constructor(
+    readonly code: string,
+    readonly stderr = "",
+  ) {
     super(code);
   }
 }
@@ -70,7 +73,12 @@ export async function runLimitedCommand(
             },
             "Document renderer command failed",
           );
-          reject(new RendererFailure("renderer_failed"));
+          reject(
+            new RendererFailure(
+              "renderer_failed",
+              Buffer.from(stderr).toString("utf8"),
+            ),
+          );
           return;
         }
         resolve({ stdout: Buffer.from(stdout), stderr: Buffer.from(stderr) });
@@ -151,15 +159,23 @@ export class LocalDocumentRenderer implements DocumentRenderer {
       return milliseconds;
     };
     const absolutePath = this.storage.absolutePath(relativePath);
+    // Poppler opens standard-security PDFs that carry an empty user password,
+    // which covers the encrypted-but-readable receipts many retailers issue. A
+    // file that genuinely needs a password fails here instead.
     const info = await this.runCommand(
       "pdfinfo",
       [absolutePath],
       this.commandOptions(1024 * 1024, remaining()),
       this.logger,
-    );
+    ).catch((error: unknown) => {
+      if (
+        error instanceof RendererFailure &&
+        /Incorrect password/i.test(error.stderr)
+      )
+        throw new RendererFailure("encrypted_pdf");
+      throw error;
+    });
     const details = info.stdout.toString("utf8");
-    if (/^Encrypted:\s+yes\r?$/im.test(details))
-      throw new RendererFailure("encrypted_pdf");
     const pageMatch = details.match(/^Pages:\s+(\d+)\r?$/m);
     const pageCount = Number(pageMatch?.[1]);
     if (

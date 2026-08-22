@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Accepted. The blanket rejection of encrypted PDFs described below is superseded
+by ADR 0020.
 
 ## Context
 
