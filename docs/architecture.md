@@ -163,12 +163,17 @@ until a later storage-aware removal operation removes its files and metadata.
 Uploads stream into a bounded staging file while computing SHA-256, and actual
 JPEG, PNG, or PDF type and structure are checked without decoding pixels or
 rendering PDF content. Exact `(SHA-256, byte size)` uniqueness is store-wide.
-The upload boundary's bounded PDF validator intentionally accepts only PDFs whose page
-objects and classic cross-reference table are visible in the file structure;
-PDFs using compressed object/cross-reference streams remain rejected at upload.
-The worker is the definitive parser for accepted PDFs; the API never decodes
-images or invokes Poppler. This conservative compatibility limit avoids
-decompressing or executing document content in the API process.
+The upload boundary's bounded PDF validator checks only the trailer skeleton
+that stays visible without decompressing or decrypting content: a document
+catalog reference, a classic cross-reference table or a cross-reference stream,
+`startxref`, and `%%EOF`. Page objects and the catalog may sit inside compressed
+object streams, and standard-security encryption hides string and stream
+payloads, so neither is treated as corruption. Visible page objects are still
+bounded by the configured page limit; PDFs that hide them are admitted and
+bounded by the worker instead. The worker is the definitive parser for accepted
+PDFs: `pdfinfo` establishes the authoritative page count and decides whether the
+file opens without a password. The API never decodes images or invokes Poppler.
+See ADR 0020.
 Replacement promotes a new, separately named original before transactionally
 repointing metadata; the old path is then cleaned through a durable retry record.
 Removal first records cleanup and removes metadata transactionally, then deletes

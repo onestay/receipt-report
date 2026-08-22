@@ -106,15 +106,23 @@ function pdf(
   parts: {
     pages?: number;
     encrypt?: boolean;
-    xref?: boolean;
+    crossReference?: "table" | "stream" | "none";
+    root?: boolean;
     startxref?: boolean;
     eof?: boolean;
   } = {},
 ): Buffer {
+  const entries =
+    `${parts.root === false ? "" : "/Root 1 0 R "}` +
+    `${parts.encrypt ? "/Encrypt 27 0 R " : ""}`;
+  const crossReference = parts.crossReference ?? "table";
+  const trailer =
+    crossReference === "stream"
+      ? `28 0 obj<</Type /XRef /Size 29 ${entries}>>stream\nendstream\nendobj\n`
+      : `${crossReference === "table" ? "xref\n0 1\n" : ""}trailer<<${entries}>>\n`;
   return Buffer.from(
     `%PDF-1.4\n${"1 0 obj<</Type /Page>>endobj\n".repeat(parts.pages ?? 1)}` +
-      `${parts.encrypt ? "trailer<</Encrypt 9 0 R>>\n" : ""}` +
-      `${parts.xref === false ? "" : "xref\n"}` +
+      trailer +
       `${parts.startxref === false ? "" : "startxref\n0\n"}` +
       `${parts.eof === false ? "" : "%%EOF\n"}`,
   );
@@ -234,12 +242,23 @@ describe("document structural validation", () => {
     now.mockRestore();
   });
 
-  it("rejects encrypted, incomplete, over-page, and timed-out PDFs", async () => {
+  it("accepts encrypted PDFs and PDFs built from cross-reference streams", async () => {
+    await expect(validate(pdf({ encrypt: true }))).resolves.toBe(
+      "application/pdf",
+    );
+    await expect(
+      validate(pdf({ pages: 0, crossReference: "stream" })),
+    ).resolves.toBe("application/pdf");
+    await expect(
+      validate(pdf({ pages: 0, crossReference: "stream", encrypt: true })),
+    ).resolves.toBe("application/pdf");
+  });
+
+  it("rejects incomplete, over-page, and timed-out PDFs", async () => {
     for (const bytes of [
-      pdf({ encrypt: true }),
       pdf({ pages: 3 }),
-      pdf({ pages: 0 }),
-      pdf({ xref: false }),
+      pdf({ root: false }),
+      pdf({ crossReference: "none" }),
       pdf({ startxref: false }),
       pdf({ eof: false }),
     ])
